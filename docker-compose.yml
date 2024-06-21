@@ -80,7 +80,7 @@ services:
   assembler:
     build:
       context: services/go-importer
-      dockerfile: Dockerfile-assembler
+      target: assembler
     image: tulip-assembler:latest
     restart: unless-stopped
     depends_on:
@@ -116,7 +116,7 @@ services:
   enricher:
     build:
       context: services/go-importer
-      dockerfile: Dockerfile-enricher
+      target: enricher
     image: tulip-enricher:latest
     restart: unless-stopped
     depends_on:

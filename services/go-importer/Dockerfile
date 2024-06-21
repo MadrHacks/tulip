@@ -1,15 +1,25 @@
+### BASE BUILDER
+
 FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache git make build-base libpcap-dev
 WORKDIR /build
 
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
 
-RUN go build ./cmd/assembler
+COPY ./ ./
+RUN go build ./cmd/enricher && go build ./cmd/assembler
 
+### ENRICHER
 
-FROM python:3.13-alpine
+FROM alpine:3.22 AS enricher
+WORKDIR /app
+COPY --from=builder /build/enricher .
+CMD ["./enricher"]
+
+### ASSEMBLER
+
+FROM python:3.13-alpine AS assembler
 RUN apk add --no-cache build-base libpcap-dev bsd-compat-headers openssl-dev
 WORKDIR /app
 
