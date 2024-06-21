@@ -1,6 +1,5 @@
-FROM golang:1.23-alpine
-
-WORKDIR /app
+FROM golang:1.23-alpine AS builder
+WORKDIR /build
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -8,3 +7,10 @@ RUN go mod download
 COPY . .
 
 RUN go build ./cmd/enricher
+
+
+FROM alpine:3.22
+WORKDIR /app
+COPY --from=builder /build/enricher .
+
+CMD ["./enricher"]
