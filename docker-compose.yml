@@ -9,8 +9,6 @@ services:
     - ./services/schema/system.sql:/docker-entrypoint-initdb.d/100_system.sql:ro
     - ./services/schema/functions.sql:/docker-entrypoint-initdb.d/101_functions.sql:ro
     - ./services/schema/schema.sql:/docker-entrypoint-initdb.d/102_schema.sql:ro
-    networks:
-      - internal
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_USER: tulip
@@ -32,8 +30,6 @@ services:
     depends_on:
       - timescale
       - api
-    networks:
-      - internal
     environment:
       API_SERVER_ENDPOINT: http://api:5000/
       VIRTUAL_HOST: tulip.h4xx.eu
@@ -46,8 +42,6 @@ services:
     restart: unless-stopped
     depends_on:
       - timescale
-    networks:
-      - internal
     volumes:
       - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
     environment:
@@ -65,8 +59,6 @@ services:
     image: tulip-flagids:latest
     depends_on:
       - timescale
-    networks:
-      - internal
     environment:
       TIMESCALE: ${TIMESCALE}
       TICK_START: ${TICK_START}
@@ -85,8 +77,6 @@ services:
     restart: unless-stopped
     depends_on:
       - timescale
-    networks:
-      - internal
     volumes:
       - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
     # Command line flags most likely to fix a tulip issue:
@@ -121,8 +111,6 @@ services:
     restart: unless-stopped
     depends_on:
       - timescale
-    networks:
-      - internal
     volumes:
       - suricata_logs:/suricata
     command: "./enricher -eve /suricata/eve.json"
@@ -132,8 +120,6 @@ services:
   suricata:
     build: services/suricata
     restart: unless-stopped
-    networks:
-      - internal
     volumes:
       - suricata_logs:/suricata
       - ./services/suricata/suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
@@ -145,6 +131,3 @@ services:
 volumes:
   timescale-data:
   suricata_logs:
-
-networks:
-  internal:
