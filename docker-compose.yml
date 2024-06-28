@@ -124,13 +124,27 @@ services:
     networks:
       - internal
     volumes:
-      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
-    command: "./enricher -eve ${TRAFFIC_DIR_DOCKER}/eve.json"
+      - suricata_logs:/suricata
+    command: "./enricher -eve /suricata/eve.json"
     environment:
       TIMESCALE: ${TIMESCALE}
 
+  suricata:
+    build: services/suricata
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - suricata_logs:/suricata
+      - ./services/suricata/suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
+    environment:
+      PCAP_OVER_IP: ${PCAP_OVER_IP}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   timescale-data:
+  suricata_logs:
 
 networks:
   internal:
