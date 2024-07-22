@@ -110,23 +110,31 @@ services:
     restart: unless-stopped
     depends_on:
       - timescale
-    volumes:
-      - suricata_logs:/suricata
-    command: "./enricher -eve /suricata/eve.json"
+      - redis
     environment:
       TIMESCALE: ${TIMESCALE}
+      REDIS_URL: redis://redis:6379
 
   suricata:
     build: services/suricata
+    depends_on:
+      - redis
     restart: unless-stopped
     volumes:
-      - suricata_logs:/suricata
-      - ./services/suricata/suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
+      - ./suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
     environment:
       PCAP_OVER_IP: ${PCAP_OVER_IP}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    tty: true
+
+  redis:
+    hostname: redis
+    image: redis:6
+    restart: unless-stopped
+
 
 volumes:
   timescale-data:
-  suricata_logs:

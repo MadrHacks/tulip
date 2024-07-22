@@ -6,12 +6,14 @@ import (
 	"net/netip"
 
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"log"
 	"os"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/gofrs/uuid/v5"
 	"github.com/tidwall/gjson"
 )
@@ -20,24 +22,34 @@ var eve_file = flag.String("eve", "", "Eve file to watch for suricata's tags")
 var timescale = flag.String("timescale", "", "Timescale connection string (e. g. postgres://usr:pwd@host:5432/tulip)")
 var tag_flowbits = flag.Bool("flowbits", true, "Tag flows with their flowbits")
 var rescan_period = flag.Int("t", 30, "rescan period (in seconds).")
+var redis_conn = flag.String("redis", "", "Redis connection string")
 
 var g_db *db.Database
 
 func main() {
 	flag.Parse()
-	if *eve_file == "" {
-		log.Fatal("Usage: ./enricher -eve eve.json")
-	}
 
 	// If no timescale connection string was supplied, use env variable
 	if *timescale == "" {
 		*timescale = os.Getenv("TIMESCALE")
 	}
+	if *redis_conn == "" {
+		*redis_conn = os.Getenv("REDIS_URL")
+	}
 
 	log.Println("Connecting to Timescale:", *timescale, "...")
 	g_db = db.NewDatabase(*timescale)
 
-	watchEve(*eve_file)
+	if *eve_file != "" {
+		watchEve(*eve_file)
+	} else if *redis_conn != "" {
+		watchRedis(*redis_conn)
+	} else {
+		log.Println("No eve file or redis connection supplied. Exiting.")
+		log.Println("Usage: enricher -eve <eve_file> -mongo <mongo_db> [-t <rescan_period>] [-flowbits]")
+		log.Println("Usage: enricher -redis <redis_url> -mongo <mongo_db> [-t <rescan_period>] [-flowbits]")
+		os.Exit(1)
+	}
 }
 
 func watchEve(eve_file string) {
@@ -247,4 +259,49 @@ func handleEveLine(json string) error {
 	}
 
 	return nil
+}
+
+func watchRedis(redisUrl string) {
+	opt, err := redis.ParseURL(redisUrl)
+	if err != nil {
+		log.Println("Failed to parse redis url:", err)
+		return
+	}
+
+	rdb := redis.NewClient(opt)
+	defer func() {
+		err := rdb.Close()
+		if err != nil {
+			log.Println("Failed to close redis connection:", err)
+		}
+	}()
+
+	log.Println("Connected to redis")
+
+	// connect to "suricata" list and ingest the data
+	for {
+		lines, err := rdb.RPopCount(context.TODO(), "suricata", 100).Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			log.Println("Failed to pop from redis:", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		processed := 0
+		for _, line := range lines {
+			err = handleEveLine(line)
+			if err != nil {
+				log.Println(`Failed to handle eve line "`, line, `": `, err)
+				continue
+			}
+			processed++
+		}
+
+		log.Println("Processed ", processed ," lines from redis")
+	}
 }
