@@ -22,13 +22,13 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/examples/util"
-	"github.com/google/gopacket/ip4defrag"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/reassembly"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/examples/util"
+	"github.com/gopacket/gopacket/ip4defrag"
+	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcap"
+	"github.com/gopacket/gopacket/pcapgo"
+	"github.com/gopacket/gopacket/reassembly"
 )
 
 var decoder = ""
