@@ -427,7 +427,7 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
           <div>
             Flags:&nbsp;
             <span className="font-bold">
-              [{flow.flags.map((query, i) => (
+              [{flow.flags?.map((query, i) => (
                 <span>
                   {i > 0 ? ", " : ""}
                   <button className="font-bold"
@@ -445,7 +445,7 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
           <div>
             Flagids:&nbsp;
             <span className="font-bold">
-              [{flow.flagids.map((query, i) => (
+              [{flow.flagids?.map((query, i) => (
                 <span>
                   {i > 0 ? ", " : ""}
                   <button className="font-bold"
