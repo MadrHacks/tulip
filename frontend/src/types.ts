@@ -16,6 +16,8 @@ export interface Flow {
   flagids: string[];
   suricata: number[];
   filename: string;
+  fuzzyhash: string;
+  similarity: number;
 }
 
 export interface TickInfo {
@@ -65,6 +67,9 @@ export interface FlowsQuery {
   tag_intersection_mode?: "AND" | "OR";
   flags?: string[];
   flagids?: string[];
+  similarity?: string;
+  fuzzyhash_include?: string[];
+  fuzzyhash_exclude?: string[];
 }
 
 export interface StatsQuery {

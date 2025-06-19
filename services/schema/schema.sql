@@ -57,6 +57,7 @@ CREATE TABLE flow (
 	tags jsonb NOT NULL DEFAULT '[]',
 	flags jsonb NOT NULL DEFAULT '[]',
 	flagids jsonb NOT NULL DEFAULT '[]',
+	fuzzyhash text NOT NULL,
 	fingerprints int[] NOT NULL DEFAULT '{}',
 	signatures jsonb NOT NULL DEFAULT '[]',
 	packets_count int NOT NULL DEFAULT 0,

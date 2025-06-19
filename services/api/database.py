@@ -58,6 +58,7 @@ class Flow:
     tags: list[str]
     flags: list[str]
     flagids: list[str]
+    fuzzyhash: str
     rank: int = 0
 
 

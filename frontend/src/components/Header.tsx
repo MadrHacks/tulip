@@ -18,6 +18,7 @@ import {
   SECOND_DIFF_KEY,
   SERVICE_REFETCH_INTERVAL_MS,
   REPR_ID_KEY,
+  SIMILARITY_FILTER_KEY,
 } from "../const";
 import {
   useGetFlowQuery,
@@ -245,6 +246,45 @@ function Diff() {
   );
 }
 
+function SimilaritySlider() {
+  let [searchParams, setSearchParams] = useSearchParams();
+  // Initialize state to keep track of the value
+  const [value, setValue] = useState(searchParams.get(SIMILARITY_FILTER_KEY) ?? 90); // You can set the initial value to whatever you prefer
+
+  // Function to update the state based on input changes
+  const handleChange = (event:any) => {
+    setValue(event.target.value);
+    searchParams.set(SIMILARITY_FILTER_KEY, event.target.value);
+    setSearchParams(searchParams);
+  };
+
+  return (
+    <div className="flex items-center">
+      <div className="pr-3">
+        <span>
+          Similarity:
+        </span>
+        <input
+          style={{paddingTop:0, paddingBottom:0}}
+          type="range"
+          min="0" // Set the minimum value of the range
+          max="100" // Set the maximum value of the range
+          value={value} // Bind the range input to the value in the state
+          onChange={handleChange} // Update the state when the range value changes
+        />
+      </div>
+      <input
+        className="w-20"
+        type="number"
+        min="0" // Set the minimum value for the number input
+        max="100" // Set the maximum value for the number input
+        value={value} // Bind the number input to the value in the state
+        onChange={handleChange} // Update the state when the number value changes
+      />
+    </div>
+  );
+}
+
 export function Header() {
   let { currentTick, setToLastnTicks, setTimeParam } = getTickStuff();
   let [searchParams] = useSearchParams();
@@ -289,6 +329,7 @@ export function Header() {
           Graph view
         </div>
       </Link>
+      <SimilaritySlider></SimilaritySlider>
       <div className="ml-auto mr-4" style={{ display: "flex" }}>
         <div className="mr-4">
           <FirstDiff />

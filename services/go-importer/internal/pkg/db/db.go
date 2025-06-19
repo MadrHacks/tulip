@@ -63,7 +63,7 @@ func NewDatabase(connectionString string) *Database {
 		tableName: pgx.Identifier{"flow"},
 		columns: []string {
 			"id", "port_src", "port_dst", "ip_src", "ip_dst", "duration", "tags",
-			"flags", "flagids", "pcap_id", "link_child_id", "link_parent_id",
+			"flags", "flagids", "fuzzyhash", "pcap_id", "link_child_id", "link_parent_id",
 			"fingerprints", "packets_count", "packets_size", "flags_in", "flags_out",
 		},
 	})
@@ -262,6 +262,7 @@ type FlowEntry struct {
 	Tags         []string `db:"tags"`
 	Flags        []string `db:"flags"`
 	Flagids      []string `db:"flagids"`
+	Fuzzyhash    string `db:"fuzzyhash"`
 	Num_packets  int `db:"packets_count"`
 	Size         int `db:"packets_size"`
 	Flags_In     int `db:"flags_in"`
@@ -390,6 +391,7 @@ func (db *Database) FlowInsert(flow FlowEntry) {
 			flow.Tags,
 			flow.Flags,
 			flow.Flagids,
+			flow.Fuzzyhash,
 			pcap_id,
 			flow.Child_id,
 			flow.Parent_id,

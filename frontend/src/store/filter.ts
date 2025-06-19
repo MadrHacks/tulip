@@ -6,6 +6,10 @@ export interface TulipFilterState {
   includeTags: string[];
   excludeTags: string[];
   tagIntersectionMode: "AND" | "OR";
+  fuzzyHashes: string[];
+  fuzzyHashIds: string[];
+  includeFuzzyHashes: string[];
+  excludeFuzzyHashes: string[];
   // startTick?: number;
   // endTick?: number;
   // service?: string;
@@ -18,6 +22,10 @@ const initialState: TulipFilterState = {
   filterFlags: [],
   filterFlagids: [],
   tagIntersectionMode: "OR",
+  fuzzyHashes: [],
+  fuzzyHashIds: [],
+  includeFuzzyHashes: [],
+  excludeFuzzyHashes: [],
 };
 
 export const filterSlice = createSlice({
@@ -67,9 +75,33 @@ export const filterSlice = createSlice({
     toggleTagIntersectMode: (state) => {
       state.tagIntersectionMode = state.tagIntersectionMode == "AND" ? "OR" : "AND";
     },
+    toggleFilterFuzzyHashes: (state, action: PayloadAction<string[]>) => {
+      var fuzzyHashes = action.payload[0];
+      var id = action.payload[1];
+      var included = state.includeFuzzyHashes.includes(fuzzyHashes);
+      var excluded = state.excludeFuzzyHashes.includes(fuzzyHashes);
+
+      // If the fuzzyHashes hash is new cache it
+      if(!state.fuzzyHashes.includes(fuzzyHashes)) {
+        state.fuzzyHashes = [...state.fuzzyHashes, fuzzyHashes];
+        state.fuzzyHashIds = [...state.fuzzyHashIds, id];
+      }
+
+      if (included) {
+        // If a user clicks a 'included' fuzzyHashes hash, the hash should be 'excluded' instead.
+        state.includeFuzzyHashes = state.includeFuzzyHashes.filter((t) => t !== fuzzyHashes);
+        state.excludeFuzzyHashes = [...state.excludeFuzzyHashes, fuzzyHashes];
+      } else if (excluded) {
+        // If the user clicks on an 'excluded' fuzzyHashes hash, the hash should be 'unset' from both include / exclude tags
+        state.excludeFuzzyHashes = state.excludeFuzzyHashes.filter((t) => t !== fuzzyHashes);
+      } else {
+        // The tag was disabled, so it should be added to included now
+        state.includeFuzzyHashes = [...state.includeFuzzyHashes, fuzzyHashes];
+      }
+    },
   },
 });
 
-export const { toggleFilterTag, toggleTagIntersectMode } = filterSlice.actions;
+export const { toggleFilterTag, toggleTagIntersectMode, toggleFilterFuzzyHashes } = filterSlice.actions;
 
 export default filterSlice.reducer;

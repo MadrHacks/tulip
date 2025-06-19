@@ -33,6 +33,8 @@ import {
   useGetFlagRegexQuery,
 } from "../api";
 import { getTickStuff } from "../tick";
+import { toggleFilterFuzzyHashes, toggleFilterTag } from "../store/filter";
+import { useAppDispatch, useAppSelector } from "../store";
 import escapeStringRegexp from "escape-string-regexp";
 
 const SECONDARY_NAVBAR_HEIGHT = 50;
@@ -364,6 +366,7 @@ function formatIP(ip: string) {
 
 function FlowOverview({ flow }: { flow: FullFlow }) {
   let [searchParams, setSearchParams] = useSearchParams();
+  const dispatch = useAppDispatch();
   const { unixTimeToTick } = getTickStuff();
   const { data: services } = useGetServicesQuery();
   const service = services?.find((s) => s.ip === flow.dst_ip && s.port === flow.dst_port)?.name ?? "unknown";
@@ -414,7 +417,17 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
           </div>
           <div>
             Tags:&nbsp;
-            <span className="font-bold">[{flow.tags.join(", ")}]</span>
+            <span className="font-bold">
+              [{flow.tags.map((tag, i) => (
+                  <span>
+                    {i > 0 ? ', ' : ''}
+                    <a className="font-bold cursor-pointer"
+                       onClick={() => dispatch(toggleFilterTag(tag))}>
+                      {tag}
+                    </a>
+                  </span>
+                ))}]
+            </span>
           </div>
           <div>
             Tick:&nbsp;
@@ -460,6 +473,14 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
               ))}]
             </span>
           </div>
+            <div>Nilsimsa hash:</div>
+            <div>
+              <a className="font-bold cursor-pointer"
+                onClick={() => dispatch(toggleFilterFuzzyHashes([flow.fuzzyhash, flow.id]))}>
+                {flow.fuzzyhash}
+              </a>
+            </div>
+          <div></div>
           <div>
             Source - Target (Duration):&nbsp;
             <div className="inline-flex items-center gap-1">

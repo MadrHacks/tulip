@@ -127,6 +127,9 @@ func reassemblyCallback(entry db.FlowEntry) {
 			ApplyFlagids(&entry, flagids)
 		}
 
+		// Compute fuzzy hash for flow entry
+		ComputeFuzzyhash(&entry)
+
 		// Finally, insert the new entry
 		g_db.FlowInsert(entry)
 	})

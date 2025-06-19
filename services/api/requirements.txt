@@ -3,3 +3,4 @@ Flask
 requests
 python-dateutil
 psycopg[binary,pool]
+https://github.com/rw-r-r-0644/cnilsimsa/archive/master.tar.gz

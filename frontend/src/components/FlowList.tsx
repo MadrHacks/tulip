@@ -14,9 +14,10 @@ import {
   START_FILTER_KEY,
   END_FILTER_KEY,
   FLOW_LIST_REFETCH_INTERVAL_MS,
+  SIMILARITY_FILTER_KEY,
 } from "../const";
 import { useAppSelector, useAppDispatch } from "../store";
-import { toggleFilterTag, toggleTagIntersectMode } from "../store/filter";
+import { toggleFilterFuzzyHashes, toggleFilterTag, toggleTagIntersectMode } from "../store/filter";
 
 import { HeartIcon, FilterIcon, LinkIcon } from "@heroicons/react/solid";
 import { HeartIcon as EmptyHeartIcon } from "@heroicons/react/outline";
@@ -49,6 +50,10 @@ export function FlowList() {
   const includeTags = useAppSelector((state) => state.filter.includeTags);
   const excludeTags = useAppSelector((state) => state.filter.excludeTags);
   const tagIntersectionMode = useAppSelector((state) => state.filter.tagIntersectionMode);
+  const includeFuzzyHashes = useAppSelector((state) => state.filter.includeFuzzyHashes);
+  const excludeFuzzyHashes = useAppSelector((state) => state.filter.excludeFuzzyHashes);
+  const fuzzyHashes = useAppSelector((state) => state.filter.fuzzyHashes);
+  const fuzzyHashIds = useAppSelector((state) => state.filter.fuzzyHashIds);
 
   const dispatch = useAppDispatch();
 
@@ -64,6 +69,7 @@ export function FlowList() {
   const text_filter = searchParams.get(TEXT_FILTER_KEY) ?? undefined;
   const from_filter = searchParams.get(START_FILTER_KEY) ?? undefined;
   const to_filter = searchParams.get(END_FILTER_KEY) ?? undefined;
+  const similarity = searchParams.get(SIMILARITY_FILTER_KEY) ?? undefined;
 
   const debounced_text_filter = useDebounce(text_filter, 300);
 
@@ -83,6 +89,9 @@ export function FlowList() {
       tag_intersection_mode: tagIntersectionMode,
       flags: filterFlags,
       flagids: filterFlagids,
+      similarity: similarity,
+      fuzzyhash_include: includeFuzzyHashes,
+      fuzzyhash_exclude: excludeFuzzyHashes,
     },
     {
       refetchOnMountOrArgChange: true,
@@ -226,6 +235,26 @@ export function FlowList() {
             </div>
           </div>
         )}
+        {showFilters && (
+          <div className="border-t-gray-300 border-t p-2">
+            <div className="flex">
+              <p className="text-sm font-bold text-gray-600 pb-2">
+                Similarity filter
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {(fuzzyHashes ?? []).map((fuzzyHash, i) => (
+                <Tag
+                  key={fuzzyHashIds[i]}
+                  tag={fuzzyHashIds[i]}
+                  disabled={!includeFuzzyHashes.includes(fuzzyHash)}
+                  excluded={excludeFuzzyHashes.includes(fuzzyHash)}
+                  onClick={() => dispatch(toggleFilterFuzzyHashes([fuzzyHash, fuzzyHashIds[i]]))}
+                ></Tag>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div></div>
       { searchMessage && <div>{searchMessage}</div> }
@@ -280,11 +309,23 @@ function FlowListEntry({ flow, isActive, onHeartClick }: FlowListEntryProps) {
     ) : (
       <div>{flow.duration}ms</div>
     );
+
+  const DEFAULT = [243, 244, 246]
+  const GREEN = [134, 239, 172]
+  const RED = [252, 165, 165]
+
+  var color: number[];
+  if (flow.similarity != undefined)
+    color = GREEN.map((g, i) => ((g*flow.similarity) + (RED[i]*(1-flow.similarity))));
+  else
+    color = DEFAULT;
+
   return (
     <li
       className={classNames({
         [classes.active]: isActive,
       })}
+      style={{backgroundColor: `rgb(${color[0]} ${color[1]} ${color[2]} / var(--tw-bg-opacity))`}}
     >
       <div className="flex">
         <div

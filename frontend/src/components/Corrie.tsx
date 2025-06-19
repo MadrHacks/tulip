@@ -9,6 +9,7 @@ import {
   CORRELATION_MODE_KEY,
   FLOW_LIST_REFETCH_INTERVAL_MS,
   UNDER_ATTACK_REFETCH_INTERVAL_MS,
+  SIMILARITY_FILTER_KEY,
 } from "../const";
 import useDebounce from "../hooks/useDebounce";
 
@@ -48,6 +49,8 @@ export const Corrie = () => {
   const excludeTags = useAppSelector((state) => state.filter.excludeTags);
   const filterFlags = useAppSelector((state) => state.filter.filterFlags);
   const filterFlagids = useAppSelector((state) => state.filter.filterFlagids);
+  const includeFuzzyHashes = useAppSelector((state) => state.filter.includeFuzzyHashes);
+  const excludeFuzzyHashes = useAppSelector((state) => state.filter.excludeFuzzyHashes);
   const tagIntersectionMode = useAppSelector((state) => state.filter.tagIntersectionMode);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -58,6 +61,7 @@ export const Corrie = () => {
   const text_filter = searchParams.get(TEXT_FILTER_KEY) ?? undefined;
   const from_filter = searchParams.get(START_FILTER_KEY) ?? undefined;
   const to_filter = searchParams.get(END_FILTER_KEY) ?? undefined;
+  const similarity = searchParams.get(SIMILARITY_FILTER_KEY) ?? undefined;
 
   const debounced_text_filter = useDebounce(text_filter, 300);
 
@@ -109,6 +113,9 @@ export const Corrie = () => {
       tag_intersection_mode: tagIntersectionMode,
       flags: filterFlags,
       flagids: filterFlagids,
+      similarity: similarity,
+      fuzzyhash_include: includeFuzzyHashes,
+      fuzzyhash_exclude: excludeFuzzyHashes,
     },
     {
       refetchOnMountOrArgChange: true,

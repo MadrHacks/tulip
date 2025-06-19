@@ -31,6 +31,7 @@ from flask import Flask, Response, send_file
 from requests import get
 import dateutil.parser
 from ipaddress import ip_network
+from fuzzyhash import fuzzyhash_filter_flows
 
 from configurations import (
     services,
@@ -83,7 +84,7 @@ def query():
     query = request.get_json()
 
     try:
-        query = database.FlowQuery(
+        db_query = database.FlowQuery(
             regex_insensitive=(
                 re.compile(query["regex_insensitive"])
                 if "regex_insensitive" in query
@@ -114,8 +115,17 @@ def query():
         )
 
     with db.connection() as c:
-        flows = c.flow_query(query)
+        flows = c.flow_query(db_query)
     flows = list(map(dataclasses.asdict, flows))
+
+    if "fuzzyhash_include" in query or "fuzzyhash_exclude" in query:
+        flows = fuzzyhash_filter_flows(
+            flows,
+            similarity=int(query.get("similarity", 90)),
+            include_set=query.get("fuzzyhash_include", []),
+            exclude_set=query.get("fuzzyhash_exclude", []),
+        )
+
     return return_json_response(flows)
 
 
