@@ -122,10 +122,12 @@ services:
     restart: unless-stopped
     volumes:
       - ./suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
     environment:
       PCAP_OVER_IP: ${PCAP_OVER_IP}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      TULIP_TRAFFIC_DIR: ${TRAFFIC_DIR_DOCKER}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     tty: true
