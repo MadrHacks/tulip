@@ -46,6 +46,7 @@ function ServiceSelection() {
   let [searchParams, setSearchParams] = useSearchParams();
   return (
     <select
+      className="rounded-md w-20 px-3 py-1.5"
       value={searchParams.get(FILTER_KEY) ?? ""}
       onChange={(event) => {
         let serviceFilter = event.target.value;
@@ -161,7 +162,7 @@ function FirstDiff() {
   return (
     <input
       type="text"
-      className="md:w-72"
+      className="md:w-36"
       placeholder="First Diff ID"
       readOnly
       value={firstFlow}
@@ -204,7 +205,7 @@ function SecondDiff() {
   return (
     <input
       type="text"
-      className="md:w-72"
+      className="md:w-36"
       placeholder="Second Flow ID"
       readOnly
       value={secondFlow}
@@ -274,7 +275,7 @@ function SimilaritySlider() {
         />
       </div>
       <input
-        className="w-20"
+        className="w-15"
         type="number"
         min="0" // Set the minimum value for the number input
         max="100" // Set the maximum value for the number input
@@ -321,12 +322,12 @@ export function Header() {
           className=" bg-amber-100 text-gray-800 rounded-md px-2 py-1"
           onClick={() => setToLastnTicks(5)}
         >
-          Last 5 ticks
+          Last 5
         </button>
       </div>
       <Link to={`/corrie?${searchParams}`}>
         <div className="bg-blue-100 text-gray-800 rounded-md px-2 py-1">
-          Graph view
+          Graph
         </div>
       </Link>
       <SimilaritySlider></SimilaritySlider>
@@ -337,7 +338,7 @@ export function Header() {
         <div className="mr-4">
           <SecondDiff />
         </div>
-        <div className="mr-6">
+        <div className="mr-4">
           <Suspense>
             <Diff />
           </Suspense>
@@ -349,9 +350,7 @@ export function Header() {
             justifyContent: "center",
             alignContent: "center",
             flexDirection: "column",
-          }}
-        >
-          Current: {currentTick}
+          }}>T: {currentTick}
         </div>
       </div>
     </>

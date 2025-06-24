@@ -473,14 +473,6 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
               ))}]
             </span>
           </div>
-            <div>Nilsimsa hash:</div>
-            <div>
-              <a className="font-bold cursor-pointer"
-                onClick={() => dispatch(toggleFilterFuzzyHashes([flow.fuzzyhash, flow.id]))}>
-                {flow.fuzzyhash}
-              </a>
-            </div>
-          <div></div>
           <div>
             Source - Target (Duration):&nbsp;
             <div className="inline-flex items-center gap-1">
@@ -495,6 +487,12 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
               </div>
               <span className="italic">({flow.duration} ms)</span>
             </div>
+          </div>
+          <div>Nilsimsa hash:&nbsp;
+            <a className="font-bold cursor-pointer"
+              onClick={() => dispatch(toggleFilterFuzzyHashes([flow.fuzzyhash, flow.id]))}>
+              {flow.fuzzyhash}
+            </a>
           </div>
         </div>
       </div>
