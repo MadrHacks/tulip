@@ -437,42 +437,46 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
             Service:&nbsp;
             <span className="font-bold">{service}</span>
           </div>
-          <div>
-            Flags:&nbsp;
-            <span className="font-bold">
-              [{flow.flags?.map((query, i) => (
-                <span>
-                  {i > 0 ? ", " : ""}
-                  <button className="font-bold"
-                    onClick={() => {
-                      searchParams.set(TEXT_FILTER_KEY, escapeStringRegexp(query));
-                      setSearchParams(searchParams);
-                    }}
-                  >
-                    {query}
-                  </button>
-                </span>
-              ))}]
-            </span>
-          </div>
-          <div>
-            Flagids:&nbsp;
-            <span className="font-bold">
-              [{flow.flagids?.map((query, i) => (
-                <span>
-                  {i > 0 ? ", " : ""}
-                  <button className="font-bold"
-                    onClick={() => {
-                      searchParams.set(TEXT_FILTER_KEY, escapeStringRegexp(query));
-                      setSearchParams(searchParams);
-                    }}
-                  >
-                    {query}
-                  </button>
-                </span>
-              ))}]
-            </span>
-          </div>
+          {flow.flags?.length > 0 && (
+            <div>
+              Flags:&nbsp;
+              <span className="font-bold">
+                [{flow.flags?.map((query, i) => (
+                  <span>
+                    {i > 0 ? ", " : ""}
+                    <button className="font-bold"
+                      onClick={() => {
+                        searchParams.set(TEXT_FILTER_KEY, escapeStringRegexp(query));
+                        setSearchParams(searchParams);
+                      }}
+                    >
+                      {query}
+                    </button>
+                  </span>
+                ))}]
+              </span>
+            </div>
+          )}
+          {flow.flagids?.length > 0 && (
+            <div>
+              Flagids:&nbsp;
+              <span className="font-bold">
+                [{flow.flagids?.map((query, i) => (
+                  <span>
+                    {i > 0 ? ", " : ""}
+                    <button className="font-bold"
+                      onClick={() => {
+                        searchParams.set(TEXT_FILTER_KEY, escapeStringRegexp(query));
+                        setSearchParams(searchParams);
+                      }}
+                    >
+                      {query}
+                    </button>
+                  </span>
+                ))}]
+              </span>
+            </div>
+          )}
           <div>
             Source - Target (Duration):&nbsp;
             <div className="inline-flex items-center gap-1">
@@ -489,10 +493,10 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
             </div>
           </div>
           <div>Nilsimsa hash:&nbsp;
-            <a className="font-bold cursor-pointer"
+            <button className="font-bold"
               onClick={() => dispatch(toggleFilterFuzzyHashes([flow.fuzzyhash, flow.id]))}>
               {flow.fuzzyhash}
-            </a>
+            </button>
           </div>
         </div>
       </div>
