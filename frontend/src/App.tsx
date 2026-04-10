@@ -26,7 +26,7 @@ function App() {
             }
           />
           <Route
-            path="diff/:id"
+            path="diff"
             element={
               <Suspense>
                 <DiffView />

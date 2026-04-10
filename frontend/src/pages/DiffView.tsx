@@ -1,4 +1,4 @@
-import { useSearchParams, Link, useParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { useState } from "react";
 import { Buffer } from "buffer";
 

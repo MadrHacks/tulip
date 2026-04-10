@@ -228,7 +228,7 @@ function Diff() {
   let navigate = useNavigate();
 
   function navigateToDiff() {
-    navigate(`/diff/${params.id ?? ""}?${searchParams}`, { replace: true });
+    navigate(`/diff?${searchParams}`, { replace: true });
   }
 
   useHotkeys("d", () => {

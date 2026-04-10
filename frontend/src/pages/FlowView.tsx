@@ -679,7 +679,7 @@ export function FlowView() {
             onClick={(e) => {
               searchParams.set(FIRST_DIFF_KEY, `${id}`);
               searchParams.set(SECOND_DIFF_KEY, `${id}:${reprId}`);
-              navigate(`/diff/${id ?? ""}?${searchParams}`, { replace: true });
+              navigate(`/diff?${searchParams}`, { replace: true });
             }}
           >
             <LightningBoltIcon className="h-5 w-5"></LightningBoltIcon>
