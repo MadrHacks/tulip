@@ -9,6 +9,9 @@
 # production
 /build
 
+# pcaps
+/services/test_pcap/
+
 # misc
 .DS_Store
 .env.local
