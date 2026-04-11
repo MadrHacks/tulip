@@ -213,7 +213,7 @@ export function FlowList() {
         {showFilters && (
           <div className="border-t-slate-300 dark:border-slate-800 border-t p-2">
             <div className="flex">
-              <p className="text-sm font-bold text-slate-600 dark:text-slate-300 pb-2">
+              <p className="text-sm font-bold text-secondary pb-2">
                 Intersection filter
               </p>
               <button
@@ -239,7 +239,7 @@ export function FlowList() {
         {showFilters && (
           <div className="border-t-slate-300 dark:border-slate-800 border-t p-2">
             <div className="flex">
-              <p className="text-sm font-bold text-slate-600 dark:text-slate-300 pb-2">
+              <p className="text-sm font-bold text-secondary pb-2">
                 Similarity filter
               </p>
             </div>

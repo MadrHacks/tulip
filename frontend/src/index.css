@@ -40,7 +40,7 @@
     @apply btn-base bg-primary-600 text-white dark:bg-primary-500 hover:bg-primary-700 disabled:opacity-50;
   }
   .btn-secondary {
-    @apply btn-base bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 hover:bg-slate-300 hover:dark:bg-slate-700 disabled:opacity-50 border border-transparent;
+    @apply btn-base bg-secondary text-secondary bg-secondary-hover disabled:opacity-50 border border-transparent;
   }
   .btn-accent {
     @apply btn-base bg-primary-100 text-primary-900 dark:bg-primary-900/50 dark:text-primary-100 disabled:opacity-50 border border-transparent;
@@ -49,15 +49,19 @@
      @apply btn-base bg-slate-800 text-white dark:bg-slate-900 disabled:opacity-50;
   }
   .input-default {
-    @apply rounded-md px-2 py-1 bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors duration-200;
+    @apply rounded-md px-2 py-1 bg-secondary text-app border border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors duration-200;
   }
   /* Theming Primitives */
   .bg-app { @apply bg-white dark:bg-slate-950; }
   .bg-panel { @apply bg-white dark:bg-slate-900; }
   .bg-sidebar { @apply bg-slate-50 dark:bg-slate-950; }
   .bg-main { @apply bg-white dark:bg-slate-950; }
+  .bg-secondary { @apply bg-slate-200 dark:bg-slate-800; }
+  .bg-secondary-hover { @apply hover:bg-slate-300 dark:hover:bg-slate-700; }
   .border-subtle { @apply border-slate-200 dark:border-slate-800; }
   .text-app { @apply text-slate-900 dark:text-slate-100; }
+  .text-secondary { @apply text-slate-700 dark:text-slate-300; }
+  .text-muted { @apply text-slate-500 dark:text-slate-400; }
 
   .panel-default {
     @apply bg-panel border-subtle border;
@@ -74,13 +78,14 @@
 
   /* Tags Styling - completely CSS driven */
   .tag-base {
-    @apply p-3 cursor-pointer rounded-md uppercase text-xs h-5 text-center flex items-center hover:opacity-90 transition-colors duration-200 text-ellipsis overflow-hidden whitespace-nowrap;
+    @apply p-3 cursor-pointer rounded-md uppercase text-xs h-5 text-center flex items-center transition-colors duration-200 text-ellipsis overflow-hidden whitespace-nowrap border border-transparent;
   }
 
   .tag-dynamic {
     background-color: hsl(var(--tag-hue, 0), 80%, 85%);
     color: hsl(var(--tag-hue, 0), 80%, 25%);
   }
+  .tag-dynamic:hover { opacity: 0.9; }
 
   html.dark .tag-dynamic {
     background-color: hsl(var(--tag-hue, 0), 60%, 25%);
@@ -88,10 +93,11 @@
   }
 
   .tag-disabled {
-    @apply bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-transparent;
+    @apply bg-secondary text-secondary bg-secondary-hover;
   }
 
   .tag-excluded {
     @apply bg-black text-white dark:bg-black dark:text-neutral-300 line-through;
   }
+  .tag-excluded:hover { opacity: 0.9; }
 }
