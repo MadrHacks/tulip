@@ -217,7 +217,7 @@ export function FlowList() {
                 Intersection filter
               </p>
               <button
-                className="btn-secondary w-24 h-5 ml-auto"
+                className="btn-secondary ml-auto text-xs py-0 h-6 px-2"
                 onClick={() => dispatch(toggleTagIntersectMode())}
               >
                 Mode:&nbsp;{tagIntersectionMode}
