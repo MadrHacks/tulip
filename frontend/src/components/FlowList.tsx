@@ -258,7 +258,7 @@ export function FlowList() {
         )}
       </div>
       <div></div>
-      { searchMessage && <div>{searchMessage}</div> }
+
       <Virtuoso
         className={classNames({
           "flex-1": true,
@@ -285,6 +285,7 @@ export function FlowList() {
           </Link>
         )}
       />
+      { searchMessage && <div className="text-[11px] text-slate-500 px-3 py-0.5 flex-shrink-0 text-left bg-panel border-t border-subtle relative z-10">{searchMessage}</div> }
     </div>
   );
 }
