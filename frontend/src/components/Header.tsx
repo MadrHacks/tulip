@@ -337,8 +337,8 @@ export function Header() {
         <Suspense>
           <Diff />
         </Suspense>
-        <span className="font-mono text-xs font-bold px-2 py-1 bg-secondary text-secondary rounded-md">
-          Tick: {currentTick}
+        <span className="text-mono text-sm px-2 py-1 bg-secondary text-secondary rounded-md">
+          T: {currentTick}
         </span>
       </div>
     </>
