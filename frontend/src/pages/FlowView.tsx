@@ -624,7 +624,7 @@ export function FlowView() {
   return (
     <div>
       <div
-        className="bg-panel border-b border-subtle shadow-md sticky top-0 flex items-center text-sm p-0"
+        className="bg-panel border-b border-subtle sticky top-0 flex items-center text-sm p-0"
         style={{ height: 51, zIndex: 100 }}
       >
         {(flow?.child_id != null || flow?.parent_id != null) ? (

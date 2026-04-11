@@ -194,7 +194,7 @@ export function FlowList() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-panel border-b border-subtle shadow-md flex flex-col">
+      <div className="bg-panel border-b border-subtle flex flex-col">
         <div className="p-2 flex items-center" style={{ height: 50 }}>
           <button
             className="btn-secondary flex gap-2 items-center text-sm"

@@ -63,7 +63,7 @@
     @apply bg-panel border-subtle border;
   }
   .toolbar-sticky {
-    @apply sticky shadow-md bg-panel overflow-auto py-1 border-y border-subtle;
+    @apply sticky bg-panel overflow-auto py-1 border-y border-subtle;
   }
   .list-item-default {
     @apply m-1 rounded-md p-2 transition-colors list-none outline-none bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800;
