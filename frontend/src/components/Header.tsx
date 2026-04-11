@@ -79,24 +79,22 @@ function TextSearch() {
     e.preventDefault()
   });
   return (
-    <div>
-      <input
-        type="text"
-        className="input-default"
-        placeholder="regex"
-        id="search"
-        value={searchParams.get(FILTER_KEY) || ""}
-        onChange={(event) => {
-          let textFilter = event.target.value;
-          if (textFilter) {
-            searchParams.set(FILTER_KEY, textFilter);
-          } else {
-            searchParams.delete(FILTER_KEY);
-          }
-          setSearchParams(searchParams);
-        }}
-      ></input>
-    </div>
+    <input
+      type="text"
+      className="input-default"
+      placeholder="regex"
+      id="search"
+      value={searchParams.get(FILTER_KEY) || ""}
+      onChange={(event) => {
+        let textFilter = event.target.value;
+        if (textFilter) {
+          searchParams.set(FILTER_KEY, textFilter);
+        } else {
+          searchParams.delete(FILTER_KEY);
+        }
+        setSearchParams(searchParams);
+      }}
+    ></input>
   );
 }
 
@@ -104,36 +102,32 @@ function TextSearch() {
 function StartDateSelection() {
   let { startTickParam, setTimeParam } = getTickStuff();
   return (
-    <div>
-      <input
-        className="input-default w-20"
-        id="startdateselection"
-        type="number"
-        placeholder="from"
-        value={startTickParam}
-        onChange={(event) => {
-          setTimeParam(event.target.value == "" ? null : parseInt(event.target.value), START_FILTER_KEY);
-        }}
-      ></input>
-    </div>
+    <input
+      className="input-default w-20"
+      id="startdateselection"
+      type="number"
+      placeholder="from"
+      value={startTickParam}
+      onChange={(event) => {
+        setTimeParam(event.target.value == "" ? null : parseInt(event.target.value), START_FILTER_KEY);
+      }}
+    ></input>
   );
 }
 
 function EndDateSelection() {
   let { endTickParam, setTimeParam } = getTickStuff();
   return (
-    <div>
-      <input
-        className="input-default w-20"
-        id="enddateselection"
-        type="number"
-        placeholder="to"
-        value={endTickParam}
-        onChange={(event) => {
-          setTimeParam(event.target.value == "" ? null : parseInt(event.target.value), END_FILTER_KEY);
-        }}
-      ></input>
-    </div>
+    <input
+      className="input-default w-20"
+      id="enddateselection"
+      type="number"
+      placeholder="to"
+      value={endTickParam}
+      onChange={(event) => {
+        setTimeParam(event.target.value == "" ? null : parseInt(event.target.value), END_FILTER_KEY);
+      }}
+    ></input>
   );
 }
 
@@ -314,60 +308,38 @@ export function Header() {
   return (
     <>
       <div className="flex items-center">
-        <Link to={`/?${searchParams}`}>
+        <Link to={`/?${searchParams}`} className="flex items-center">
           <div className="header-icon">🌷</div>
         </Link>
         <ThemeToggle />
       </div>
-      <div>
-        <TextSearch></TextSearch>
-      </div>
-      <div>
-        <Suspense>
-          <ServiceSelection></ServiceSelection>
-        </Suspense>
-      </div>
-      <div>
-        <StartDateSelection></StartDateSelection>
-      </div>
-      <div>
-        <EndDateSelection></EndDateSelection>
-      </div>
-      <div>
-        <button
-          className="btn-primary"
-          onClick={() => setToLastnTicks(5)}
-        >
-          Last 5
-        </button>
-      </div>
-      <Link to={`/corrie?${searchParams}`}>
-        <div className="btn-primary">
+      <TextSearch />
+      <Suspense>
+        <ServiceSelection />
+      </Suspense>
+      <StartDateSelection />
+      <EndDateSelection />
+      <button
+        className="btn-primary"
+        onClick={() => setToLastnTicks(5)}
+      >
+        Last 5
+      </button>
+      <Link to={`/corrie?${searchParams}`} className="flex items-center">
+        <button className="btn-primary">
           Graph
-        </div>
+        </button>
       </Link>
-      <SimilaritySlider></SimilaritySlider>
-      <div className="ml-auto mr-4" style={{ display: "flex" }}>
-        <div className="mr-4">
-          <FirstDiff />
-        </div>
-        <div className="mr-4">
-          <SecondDiff />
-        </div>
-        <div className="mr-4">
-          <Suspense>
-            <Diff />
-          </Suspense>
-        </div>
-        <div
-          className="ml-auto"
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            alignContent: "center",
-            flexDirection: "column",
-          }}>T: {currentTick}
-        </div>
+      <SimilaritySlider />
+      <div className="ml-auto mr-4 flex items-center gap-3">
+        <FirstDiff />
+        <SecondDiff />
+        <Suspense>
+          <Diff />
+        </Suspense>
+        <span className="font-mono text-xs font-bold px-2 py-1 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md">
+          Tick: {currentTick}
+        </span>
       </div>
     </>
   );
