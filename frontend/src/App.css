@@ -4,9 +4,10 @@
 .grid-container {
   display: grid;
   grid-template-columns: 400px 1fr;
-  grid-template-rows: 50px calc(100vh - 50px);
+  grid-template-rows: auto minmax(0, 1fr);
   grid-column-gap: 0px;
   grid-row-gap: 0px;
+  height: 100vh;
 }
 
 .flow-list-area {
@@ -35,12 +36,11 @@
 .header {
   display: flex;
   align-items: center;
-  height: 50px;
-  @apply gap-3;
+  min-height: 50px;
+  @apply px-2 gap-2;
   .header-icon {
-    @apply text-2xl pl-5 pr-2
+    @apply text-2xl pr-2
   }
-  
 }
 
 .text-mono {

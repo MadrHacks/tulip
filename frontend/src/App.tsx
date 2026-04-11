@@ -54,10 +54,8 @@ function App() {
 function Layout() {
   return (
     <div className="grid-container bg-app text-app min-h-screen">
-      <header className="header-area border-b border-subtle bg-panel">
-        <div className="header">
+      <header className="header-area border-b border-subtle bg-panel flex flex-col">
           <Header></Header>
-        </div>
       </header>
       <aside className="flow-list-area border-r border-subtle bg-sidebar">
         <Suspense>

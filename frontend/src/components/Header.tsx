@@ -159,7 +159,7 @@ function FirstDiff() {
   return (
     <input
       type="text"
-      className="input-default md:w-36"
+      className="input-default flex-1 min-w-0"
       placeholder="First Diff ID"
       readOnly
       value={firstFlow}
@@ -202,7 +202,7 @@ function SecondDiff() {
   return (
     <input
       type="text"
-      className="input-default md:w-36"
+      className="input-default flex-1 min-w-0"
       placeholder="Second Flow ID"
       readOnly
       value={secondFlow}
@@ -296,6 +296,7 @@ function ThemeToggle() {
 export function Header() {
   let { currentTick, setToLastnTicks, setTimeParam } = getTickStuff();
   let [searchParams] = useSearchParams();
+  const [showDiffPanel, setShowDiffPanel] = useState(false);
 
   useHotkeys('a', () => setToLastnTicks(5));
   useHotkeys('c', () => {
@@ -307,40 +308,55 @@ export function Header() {
 
   return (
     <>
-      <div className="flex items-center">
-        <Link to={`/?${searchParams}`} className="flex items-center">
-          <div className="header-icon">🌷</div>
-        </Link>
-        <ThemeToggle />
-      </div>
-      <TextSearch />
-      <Suspense>
-        <ServiceSelection />
-      </Suspense>
-      <StartDateSelection />
-      <EndDateSelection />
-      <button
-        className="btn-primary"
-        onClick={() => setToLastnTicks(5)}
-      >
-        Last 5
-      </button>
-      <Link to={`/corrie?${searchParams}`} className="flex items-center">
-        <button className="btn-primary">
-          Graph
-        </button>
-      </Link>
-      <SimilaritySlider />
-      <div className="ml-auto mr-4 flex items-center gap-3">
-        <FirstDiff />
-        <SecondDiff />
+      <div className="header w-full">
+        <div className="flex items-center">
+          <Link to={`/?${searchParams}`} className="flex items-center">
+            <div className="header-icon">🌷</div>
+          </Link>
+        </div>
+        <TextSearch />
         <Suspense>
-          <Diff />
+          <ServiceSelection />
         </Suspense>
-        <span className="text-mono text-sm px-2 py-1 bg-secondary text-secondary rounded-md">
-          T: {currentTick}
-        </span>
+        <StartDateSelection />
+        <EndDateSelection />
+        <button
+          className="btn-primary"
+          onClick={() => setToLastnTicks(5)}
+        >
+          Last 5
+        </button>
+        <Link to={`/corrie?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Graph
+          </button>
+        </Link>
+        <button
+          className="btn-primary"
+          onClick={() => setShowDiffPanel((v) => !v)}
+        >
+          Diff Tool
+        </button>
+        <SimilaritySlider />
+        <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
+          <span className="text-mono text-sm px-2 py-1 bg-secondary text-secondary rounded-md">
+            T: {currentTick}
+          </span>
+        </div>
       </div>
+      {showDiffPanel && (
+        <div className="w-full flex items-center gap-2 py-2 px-2 border-t border-subtle bg-panel">
+          <span className="text-sm font-semibold text-secondary whitespace-nowrap">Diff Selection:</span>
+          <FirstDiff />
+          <SecondDiff />
+          <div className="ml-auto flex items-center">
+            <Suspense>
+              <Diff />
+            </Suspense>
+          </div>
+        </div>
+      )}
     </>
   );
 }
