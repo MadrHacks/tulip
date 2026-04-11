@@ -23,6 +23,7 @@ import { HeartIcon, FilterIcon, LinkIcon } from "@heroicons/react/solid";
 import { HeartIcon as EmptyHeartIcon } from "@heroicons/react/outline";
 
 import classes from "./FlowList.module.css";
+import { useTheme } from "../hooks/useTheme";
 import { format } from "date-fns";
 import useDebounce from "../hooks/useDebounce";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
@@ -193,10 +194,10 @@ export function FlowList() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-white border-b-gray-300 border-b shadow-md flex flex-col">
-        <div className="p-2 flex" style={{ height: 50 }}>
+      <div className="bg-panel border-b border-subtle shadow-md flex flex-col">
+        <div className="p-2 flex items-center" style={{ height: 50 }}>
           <button
-            className="flex gap-1 items-center text-sm"
+            className="btn-secondary flex gap-2 items-center text-sm"
             onClick={() => setShowFilters(!showFilters)}
           >
             {<FilterIcon height={20} className="text-gray-400"></FilterIcon>}
@@ -204,19 +205,19 @@ export function FlowList() {
           </button>
           {/* Maybe we want to use a search button instead of live search */}
           {false && (
-            <button className="ml-auto items-center bg-blue-600 text-white px-2 rounded-md text-sm">
+            <button className="btn-primary ml-auto flex items-center">
               Search
             </button>
           )}
         </div>
         {showFilters && (
-          <div className="border-t-gray-300 border-t p-2">
+          <div className="border-t-slate-300 dark:border-slate-800 border-t p-2">
             <div className="flex">
-              <p className="text-sm font-bold text-gray-600 pb-2">
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-300 pb-2">
                 Intersection filter
               </p>
               <button
-                className="w-24 h-5 bg-blue-100 text-sm rounded-md ml-auto"
+                className="btn-secondary w-24 h-5 ml-auto"
                 onClick={() => dispatch(toggleTagIntersectMode())}
               >
                 Mode:&nbsp;{tagIntersectionMode}
@@ -236,9 +237,9 @@ export function FlowList() {
           </div>
         )}
         {showFilters && (
-          <div className="border-t-gray-300 border-t p-2">
+          <div className="border-t-slate-300 dark:border-slate-800 border-t p-2">
             <div className="flex">
-              <p className="text-sm font-bold text-gray-600 pb-2">
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-300 pb-2">
                 Similarity filter
               </p>
             </div>
@@ -295,6 +296,7 @@ interface FlowListEntryProps {
 }
 
 function FlowListEntry({ flow, isActive, onHeartClick }: FlowListEntryProps) {
+  const { isDark } = useTheme();
   const formatted_time_h_m_s = format(new Date(flow.time), "HH:mm:ss");
   const formatted_time_ms = format(new Date(flow.time), ".SSS");
 
@@ -310,22 +312,19 @@ function FlowListEntry({ flow, isActive, onHeartClick }: FlowListEntryProps) {
       <div>{flow.duration}ms</div>
     );
 
-  const DEFAULT = [243, 244, 246]
-  const GREEN = [134, 239, 172]
-  const RED = [252, 165, 165]
-
-  var color: number[];
-  if (flow.similarity != undefined)
-    color = GREEN.map((g, i) => ((g*flow.similarity) + (RED[i]*(1-flow.similarity))));
-  else
-    color = DEFAULT;
+  let backgroundStyle = {};
+  if (flow.similarity != undefined && !isActive) {
+    backgroundStyle = {
+      backgroundColor: `color-mix(in srgb, var(--bg-similarity-good) ${flow.similarity * 100}%, var(--bg-similarity-bad))`
+    };
+  }
 
   return (
     <li
-      className={classNames({
-        [classes.active]: isActive,
+      className={classNames("list-item-default", {
+        "list-item-active": isActive,
       })}
-      style={{backgroundColor: `rgb(${color[0]} ${color[1]} ${color[2]} / var(--tw-bg-opacity))`}}
+      style={backgroundStyle}
     >
       <div className="flex">
         <div
@@ -344,23 +343,23 @@ function FlowListEntry({ flow, isActive, onHeartClick }: FlowListEntryProps) {
 
         <div className="w-5 mr-2 self-center shrink-0">
           {flow.child_id != null || flow.parent_id != null ? (
-            <LinkIcon className="text-blue-500" />
+            <LinkIcon className="text-primary-500" />
           ) : undefined}
         </div>
         <div className="flex-1 shrink">
           <div className="flex">
             <div className="shrink-0">
-              <span className="text-gray-700 font-bold overflow-ellipsis overflow-hidden ">
+              <span className="text-gray-700 dark:text-gray-200 font-bold overflow-ellipsis overflow-hidden ">
                 {flow.service_tag}
               </span>
-              <span className="text-gray-500">:{flow.dst_port}</span>
+              <span className="text-gray-500 dark:text-gray-400">:{flow.dst_port}</span>
             </div>
 
             <div className="ml-2">
-              <span className="text-gray-500">{formatted_time_h_m_s}</span>
-              <span className="text-gray-300">{formatted_time_ms}</span>
+              <span className="text-gray-500 dark:text-gray-300">{formatted_time_h_m_s}</span>
+              <span className="text-gray-400 dark:text-gray-500">{formatted_time_ms}</span>
             </div>
-            <div className="text-gray-500 ml-auto">{duration}</div>
+            <div className="text-gray-500 dark:text-gray-400 ml-auto">{duration}</div>
           </div>
           <div className="flex gap-2 flex-wrap">
             {filtered_tag_list.map((tag) => (

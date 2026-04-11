@@ -47,7 +47,7 @@ function CopyButton({ copyText }: { copyText?: string }) {
     <>
       {copyText && (
         <button
-          className="p-2 text-sm text-blue-500"
+          className="p-2 text-sm text-primary-500"
           onClick={copy}
           disabled={!copyText}
         >
@@ -84,8 +84,8 @@ function highlightText(flowText: string, search_string: string, flag_string: str
     return flowText
   }
   try {
-    const searchClasses = "bg-orange-200 rounded-sm";
-    const flagClasses = "bg-red-200 rounded-sm";
+    const searchClasses = "bg-orange-200 dark:bg-orange-800 dark:text-orange-100 rounded-sm";
+    const flagClasses = "bg-red-200 dark:bg-red-800 dark:text-red-100 rounded-sm";
 
     // Matches are stored as `[start index, end index]`.
     // For some reason tsc compiler (during build) thinks that `x.index` can be undefined (no, it can't).
@@ -175,7 +175,7 @@ function WebFlow({ flow }: { flow: FlowData }) {
   return (
     <FlowContainer>
       <pre>{header}</pre>
-      <div className="border border-gray-200 rounded-lg">
+      <div className="border border-slate-200 dark:border-slate-800 rounded-lg">
         <Hack
           srcDoc={http_content}
           sandbox=""
@@ -249,7 +249,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
   return (
     <div className="text-mono" id={id}>
       <div
-        className="sticky shadow-md bg-white overflow-auto py-1 border-y"
+        className="toolbar-sticky"
         style={{ top: SECONDARY_NAVBAR_HEIGHT }}
       >
         <div className="flex items-center h-6">
@@ -265,7 +265,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
             <span className="text-gray-400 pl-3">{delta_time}ms</span>
           </div>
           <button
-            className="bg-gray-200 py-1 px-2 rounded-md text-sm"
+            className="btn-secondary"
             onClick={async () => {
               window.open(
                 "https://gchq.github.io/CyberChef/#input=" +
@@ -277,7 +277,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
           </button>
           {flowType == "Web" && flowBody && (
             <button
-              className="bg-gray-200 py-1 px-2 rounded-md text-sm ml-2"
+              className="btn-secondary ml-2"
               onClick={async () => {
                 window.open(
                   "https://gchq.github.io/CyberChef/#input=" +
@@ -289,7 +289,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
             </button>
           )}
           <button
-            className="bg-gray-200 py-1 px-2 rounded-md text-sm ml-2"
+            className="btn-secondary ml-2"
             onClick={async () => {
               const blob = new Blob([Buffer.from(flow.b64, "base64")], {
                 type: "application/octet-stream",
@@ -309,7 +309,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
           </button>
           {flowType == "Web" && flowBody && (
             <button
-              className="bg-gray-200 py-1 px-2 rounded-md text-sm ml-2"
+              className="btn-secondary ml-2"
               onClick={async () => {
                 const blob = new Blob([flowBody[1]], {
                   type: flowBody[0].toString(),
@@ -339,8 +339,8 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
       <div
         className={
           flow.from === "s"
-            ? "border-l-8 border-green-300"
-            : "border-l-8 border-red-300"
+            ? "border-l-8 border-green-300 dark:border-green-700"
+            : "border-l-8 border-red-300 dark:border-red-800"
         }
       >
         {displayOption === "Hex" && <HexFlow flow={flow}></HexFlow>}
@@ -373,7 +373,7 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
   return (
     <div>
       {flow.signatures?.length > 0 ? (
-        <div className="bg-blue-200 p-2">
+        <div className="bg-primary-200 dark:bg-primary-900 border-l-[4px] border-primary-400 dark:border-primary-500 p-2 dark:text-primary-100">
           <div className="font-extrabold">Suricata</div>
           <div className="pl-2">
             {flow.signatures.map((sig) => {
@@ -405,7 +405,7 @@ function FlowOverview({ flow }: { flow: FullFlow }) {
           </div>
         </div>
       ) : undefined}
-      <div className="bg-yellow-200 p-2">
+      <div className="bg-slate-100 dark:bg-slate-900 border-l-[4px] border-slate-400 dark:border-slate-700 p-2 dark:text-slate-100">
         <div className="font-extrabold">Meta</div>
         <div className="pl-2">
           <div>
@@ -624,13 +624,13 @@ export function FlowView() {
   return (
     <div>
       <div
-        className="sticky shadow-md top-0 bg-white overflow-auto border-b border-b-gray-200 flex"
-        style={{ height: SECONDARY_NAVBAR_HEIGHT, zIndex: 100 }}
+        className="bg-panel border-b border-subtle shadow-md sticky top-0 flex items-center text-sm p-0"
+        style={{ height: 51, zIndex: 100 }}
       >
         {(flow?.child_id != null || flow?.parent_id != null) ? (
           <div className="flex align-middle p-2 gap-3">
             <button
-              className="bg-yellow-700 text-white px-2 text-sm rounded-md disabled:opacity-50"
+              className="btn-primary"
               key={"parent" + flow.parent_id}
               disabled={flow?.parent_id === null}
               onMouseDown={(e) => {
@@ -644,7 +644,7 @@ export function FlowView() {
               <ArrowCircleUpIcon className="inline-flex items-baseline w-5 h-5"></ArrowCircleUpIcon> Parent
             </button>
             <button
-              className="bg-yellow-700 text-white px-2 text-sm rounded-md disabled:opacity-50"
+              className="btn-primary"
               key={"child" + flow.child_id}
               disabled={flow?.child_id === null}
               onMouseDown={(e) => {
@@ -664,7 +664,7 @@ export function FlowView() {
           <select
             id="repr-select"
             value={reprId}
-            className="border-2 border-gray-700 text-black px-2 text-sm rounded-md"
+            className="input-default"
             onChange={(e) => {
               const target = e.target as HTMLSelectElement;
               const newreprid = parseInt(target.value);
@@ -674,7 +674,7 @@ export function FlowView() {
             {flow?.flow.map((e, i) => <option key={id + "reprselect" + i} value={i}>{e["type"]}</option>)}
           </select>
           {reprId > 0 ? <button
-            className="bg-gray-700 text-white px-2 text-sm rounded-md"
+            className="btn-secondary"
             title="Diff this representation with the base"
             onClick={(e) => {
               searchParams.set(FIRST_DIFF_KEY, `${id}`);
@@ -685,14 +685,14 @@ export function FlowView() {
             <LightningBoltIcon className="h-5 w-5"></LightningBoltIcon>
           </button> : undefined}
           <button
-            className="bg-gray-700 text-white px-2 text-sm rounded-md"
+            className="btn-secondary"
             onClick={copyPwn}
           >
             {pwnCopyStatusText}
           </button>
 
           <button
-            className="bg-gray-700 text-white px-2 text-sm rounded-md"
+            className="btn-secondary"
             onClick={copyRequests}
           >
             {requestsCopyStatusText}

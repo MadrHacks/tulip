@@ -11,28 +11,39 @@ import { hexy } from "hexy";
 
 import { FIRST_DIFF_KEY, SECOND_DIFF_KEY } from "../const";
 import { useGetFlowQuery } from "../api";
+import { useTheme } from "../hooks/useTheme";
 
-function Flow(flow1: string, flow2: string) {
+function Flow(flow1: string, flow2: string, isDark: boolean) {
   return (
-    <div>
+    <div className="pb-8">
       <ReactDiffViewer
         oldValue={flow1}
         newValue={flow2}
         splitView={true}
         showDiffOnly={false}
-        useDarkTheme={false}
+        useDarkTheme={isDark}
         hideLineNumbers={true}
         styles={{
           line: {
             wordBreak: "break-word",
           },
-        }}
-      />
-      <hr
-        style={{
-          height: "1px",
-          color: "inherit",
-          borderTopWidth: "5px",
+          variables: {
+            dark: {
+              diffViewerBackground: '#0f172a',
+              diffViewerTitleBackground: '#1e293b',
+              diffViewerTitleColor: '#e2e8f0',
+              addedBackground: 'rgba(20, 184, 166, 0.15)',
+              addedColor: '#e2e8f0',
+              removedBackground: 'rgba(239, 68, 68, 0.15)',
+              removedColor: '#e2e8f0',
+              wordAddedBackground: 'rgba(20, 184, 166, 0.4)',
+              wordRemovedBackground: 'rgba(239, 68, 68, 0.4)',
+              emptyLineBackground: '#1e293b',
+              gutterBackground: '#0f172a',
+              gutterBackgroundDark: '#1e293b',
+              gutterColor: '#64748b',
+            }
+          }
         }}
       />
     </div>
@@ -76,6 +87,7 @@ export function DiffView() {
   const secondFlowParam = searchParams.get(SECOND_DIFF_KEY);
   const secondFlowId = secondFlowParam?.split(":")[0];
   const secondFlowRepr = parseInt(secondFlowParam?.split(":")[1] ?? "0");
+  const { isDark } = useTheme();
 
   let { data: firstFlow, isLoading: firstFlowLoading, isError: firstFlowError } = useGetFlowQuery(
     firstFlowId!,
@@ -104,12 +116,12 @@ export function DiffView() {
 
   return (
     <div>
-      <div className="sticky shadow-md bg-white overflow-auto py-1 border-y flex items-center">
+      <div className="toolbar-sticky flex items-center">
         <RadioGroup
           options={displayOptions}
           value={displayOption}
           onChange={setDisplayOption}
-          className="flex gap-2 text-gray-800 text-sm mr-4"
+          className="flex gap-2 text-sm mr-4"
         />
       </div>
 
@@ -120,7 +132,7 @@ export function DiffView() {
             {
               length: Math.min(firstFlow!.flow[firstFlowRepr].flow.length, secondFlow!.flow[secondFlowRepr].flow.length),
             },
-            (_, i) => Flow(firstFlow!.flow[firstFlowRepr].flow[i].data, secondFlow!.flow[secondFlowRepr].flow[i].data)
+            (_, i) => Flow(firstFlow!.flow[firstFlowRepr].flow[i].data, secondFlow!.flow[secondFlowRepr].flow[i].data, isDark)
           )}
         </div>
       )}
@@ -135,7 +147,8 @@ export function DiffView() {
             (_, i) =>
               Flow(
                 hexy(Buffer.from(firstFlow!.flow[firstFlowRepr].flow[i].b64, 'base64'), { format: "twos" }),
-                hexy(Buffer.from(secondFlow!.flow[secondFlowRepr].flow[i].b64, 'base64'), { format: "twos" })
+                hexy(Buffer.from(secondFlow!.flow[secondFlowRepr].flow[i].b64, 'base64'), { format: "twos" }),
+                isDark
               )
           )}
         </div>

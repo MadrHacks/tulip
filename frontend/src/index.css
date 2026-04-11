@@ -3,3 +3,95 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html.dark {
+    color-scheme: dark;
+    --bg-similarity-default: color-mix(in srgb, theme('colors.slate.800') 50%, theme('colors.slate.900'));
+    --bg-similarity-good: theme('colors.primary.900');
+    --bg-similarity-bad: theme('colors.red.900');
+  }
+
+  :root {
+    --bg-similarity-default: theme('colors.white');
+    --bg-similarity-good: theme('colors.primary.50');
+    --bg-similarity-bad: theme('colors.red.50');
+  }
+
+  body {
+    @apply bg-white dark:bg-slate-950 text-black dark:text-slate-100 transition-colors duration-200;
+  }
+
+  /* Universal Scrollbar Integration */
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: theme('colors.slate.300') theme('colors.slate.100');
+  }
+  html.dark * {
+    scrollbar-color: theme('colors.slate.700') theme('colors.slate.900');
+  }
+}
+
+@layer components {
+  .btn-base {
+    @apply rounded-md text-sm px-2 py-1 transition-colors duration-200;
+  }
+  .btn-primary {
+    @apply btn-base bg-primary-600 text-white dark:bg-primary-500 hover:bg-primary-700 disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply btn-base bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 hover:bg-slate-300 hover:dark:bg-slate-700 disabled:opacity-50 border border-transparent;
+  }
+  .btn-accent {
+    @apply btn-base bg-primary-100 text-primary-900 dark:bg-primary-900/50 dark:text-primary-100 disabled:opacity-50 border border-transparent;
+  }
+  .btn-dark {
+     @apply btn-base bg-slate-800 text-white dark:bg-slate-900 disabled:opacity-50;
+  }
+  .input-default {
+    @apply rounded-md px-2 py-1 bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors duration-200;
+  }
+  /* Theming Primitives */
+  .bg-app { @apply bg-white dark:bg-slate-950; }
+  .bg-panel { @apply bg-white dark:bg-slate-900; }
+  .bg-sidebar { @apply bg-slate-50 dark:bg-slate-950; }
+  .bg-main { @apply bg-white dark:bg-slate-950; }
+  .border-subtle { @apply border-slate-200 dark:border-slate-800; }
+  .text-app { @apply text-slate-900 dark:text-slate-100; }
+
+  .panel-default {
+    @apply bg-panel border-subtle border;
+  }
+  .toolbar-sticky {
+    @apply sticky shadow-md bg-panel overflow-auto py-1 border-y border-subtle;
+  }
+  .list-item-default {
+    @apply m-1 rounded-md p-2 transition-colors list-none outline-none bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800;
+  }
+  .list-item-active {
+    @apply border-l-[6px] border-l-primary-500 !bg-primary-100 dark:!bg-primary-900/50;
+  }
+
+  /* Tags Styling - completely CSS driven */
+  .tag-base {
+    @apply p-3 cursor-pointer rounded-md uppercase text-xs h-5 text-center flex items-center hover:opacity-90 transition-colors duration-200 text-ellipsis overflow-hidden whitespace-nowrap;
+  }
+
+  .tag-dynamic {
+    background-color: hsl(var(--tag-hue, 0), 80%, 85%);
+    color: hsl(var(--tag-hue, 0), 80%, 25%);
+  }
+
+  html.dark .tag-dynamic {
+    background-color: hsl(var(--tag-hue, 0), 60%, 25%);
+    color: hsl(var(--tag-hue, 0), 80%, 85%);
+  }
+
+  .tag-disabled {
+    @apply bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-transparent;
+  }
+
+  .tag-excluded {
+    @apply bg-black text-white dark:bg-black dark:text-neutral-300 line-through;
+  }
+}

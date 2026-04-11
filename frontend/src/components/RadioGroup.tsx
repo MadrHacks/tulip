@@ -14,8 +14,8 @@ export function RadioGroup(props: RadioGroupProps) {
         <div
           key={option}
           onClick={() => props.onChange(option)}
-          className={classNames("py-1 px-2 rounded-md cursor-pointer", {
-            "bg-gray-200": option === props.value,
+          className={classNames("py-1 px-2 rounded-md cursor-pointer text-neutral-800 dark:text-neutral-300 transition-colors", {
+            "bg-primary-100 text-primary-900 dark:bg-primary-900/50 dark:text-primary-100 shadow-sm": option === props.value,
           })}
         >
           {option}

@@ -8,6 +8,8 @@ import {
   useNavigate,
 } from "react-router-dom";
 import ReactDiffViewer from "react-diff-viewer";
+import { SunIcon, MoonIcon } from "@heroicons/react/solid";
+import { useTheme } from "../hooks/useTheme";
 
 import {
   END_FILTER_KEY,
@@ -46,7 +48,7 @@ function ServiceSelection() {
   let [searchParams, setSearchParams] = useSearchParams();
   return (
     <select
-      className="rounded-md w-20 px-3 py-1.5"
+      className="input-default w-20"
       value={searchParams.get(FILTER_KEY) ?? ""}
       onChange={(event) => {
         let serviceFilter = event.target.value;
@@ -80,6 +82,7 @@ function TextSearch() {
     <div>
       <input
         type="text"
+        className="input-default"
         placeholder="regex"
         id="search"
         value={searchParams.get(FILTER_KEY) || ""}
@@ -103,7 +106,7 @@ function StartDateSelection() {
   return (
     <div>
       <input
-        className="w-20"
+        className="input-default w-20"
         id="startdateselection"
         type="number"
         placeholder="from"
@@ -121,7 +124,7 @@ function EndDateSelection() {
   return (
     <div>
       <input
-        className="w-20"
+        className="input-default w-20"
         id="enddateselection"
         type="number"
         placeholder="to"
@@ -162,7 +165,7 @@ function FirstDiff() {
   return (
     <input
       type="text"
-      className="md:w-36"
+      className="input-default md:w-36"
       placeholder="First Diff ID"
       readOnly
       value={firstFlow}
@@ -205,7 +208,7 @@ function SecondDiff() {
   return (
     <input
       type="text"
-      className="md:w-36"
+      className="input-default md:w-36"
       placeholder="Second Flow ID"
       readOnly
       value={secondFlow}
@@ -237,7 +240,7 @@ function Diff() {
 
   return (
     <button
-      className=" bg-amber-100 text-gray-800 rounded-md px-2 py-1"
+      className="btn-primary"
       onClick={() => {
         navigateToDiff()
       }}
@@ -261,11 +264,12 @@ function SimilaritySlider() {
 
   return (
     <div className="flex items-center">
-      <div className="pr-3">
+      <div className="pr-3 flex flex-col text-sm justify-center">
         <span>
           Similarity:
         </span>
         <input
+          className="accent-primary-600 dark:accent-primary-400"
           style={{paddingTop:0, paddingBottom:0}}
           type="range"
           min="0" // Set the minimum value of the range
@@ -275,7 +279,7 @@ function SimilaritySlider() {
         />
       </div>
       <input
-        className="w-15"
+        className="input-default w-16"
         type="number"
         min="0" // Set the minimum value for the number input
         max="100" // Set the maximum value for the number input
@@ -283,6 +287,15 @@ function SimilaritySlider() {
         onChange={handleChange} // Update the state when the number value changes
       />
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const { isDark, toggleDark } = useTheme();
+  return (
+    <button onClick={toggleDark} className="btn-secondary ml-2 flex items-center justify-center p-1" title="Toggle Dark Mode">
+      {isDark ? <SunIcon className="w-5 h-5 text-yellow-500" /> : <MoonIcon className="w-5 h-5 text-gray-700" />}
+    </button>
   );
 }
 
@@ -300,9 +313,12 @@ export function Header() {
 
   return (
     <>
-      <Link to={`/?${searchParams}`}>
-        <div className="header-icon">🌷</div>
-      </Link>
+      <div className="flex items-center">
+        <Link to={`/?${searchParams}`}>
+          <div className="header-icon">🌷</div>
+        </Link>
+        <ThemeToggle />
+      </div>
       <div>
         <TextSearch></TextSearch>
       </div>
@@ -319,14 +335,14 @@ export function Header() {
       </div>
       <div>
         <button
-          className=" bg-amber-100 text-gray-800 rounded-md px-2 py-1"
+          className="btn-primary"
           onClick={() => setToLastnTicks(5)}
         >
           Last 5
         </button>
       </div>
       <Link to={`/corrie?${searchParams}`}>
-        <div className="bg-blue-100 text-gray-800 rounded-md px-2 py-1">
+        <div className="btn-primary">
           Graph
         </div>
       </Link>
