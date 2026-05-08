@@ -2,14 +2,30 @@
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 import psycopg_pool
 import requests
+import yaml
+
+CONFIG_DIR = os.environ.get("AD_INFRA_CONFIG_DIR", "/config")
+
+
+def _load(name):
+    p = Path(CONFIG_DIR) / f"{name}.yml"
+    if p.exists():
+        text = p.read_text()
+        return yaml.safe_load(text) if text else {}
+    return {}
+
+
+_game = _load("game")
+_vulnbox = _load("vulnbox")
 
 DELAY = 5  # DELAY from start of tick
-tick_length = int(os.getenv("TICK_LENGTH", 10 * 1000)) // 1000
-start_date = os.getenv("TICK_START", "2018-06-27T13:00+02:00")
-team_id = os.getenv("TEAM_ID", "10.10.3.1")
+tick_length = int(_game.get("tick_duration_sec", 120))
+start_date = _game.get("start", "")
+team_id = _vulnbox.get("ip", "")
 team_id_is_digit = team_id.isdigit()
 team_id_int = int(team_id) if team_id_is_digit else None
 flagid_endpoint = os.getenv("FLAGID_ENDPOINT", "http://localhost:8000/flagids.json")

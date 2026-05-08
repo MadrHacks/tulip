@@ -25,26 +25,38 @@
 import os
 from pathlib import Path
 
+import yaml
+
+CONFIG_DIR = os.environ.get("AD_INFRA_CONFIG_DIR", "/config")
+
+
+def _load(name):
+    p = Path(CONFIG_DIR) / f"{name}.yml"
+    if p.exists():
+        text = p.read_text()
+        return yaml.safe_load(text) if text else {}
+    return {}
+
+
+_game = _load("game")
+_vulnbox = _load("vulnbox")
+_services = _load("services")
+
 traffic_dir = Path(os.getenv("TULIP_TRAFFIC_DIR", "/traffic"))
 dump_pcaps_dir = Path(os.getenv("DUMP_PCAPS", "/traffic"))
-tick_length = os.getenv("TICK_LENGTH", 2*60*1000)
-flag_lifetime = os.getenv("FLAG_LIFETIME", 5)
-start_date = os.getenv("TICK_START", "2018-06-27T13:00:00+02:00")
-flag_regex = os.getenv("FLAG_REGEX", "[A-Z0-9]{31}=")
-vm_ip = os.getenv("VM_IP", "10.10.3.1")
+tick_length = int(_game.get("tick_duration_sec", 120)) * 1000
+flag_lifetime = int(_game.get("flag_lifetime_ticks", 5))
+start_date = _game.get("start", "")
+flag_regex = _game.get("flag_regex", "[A-Z0-9]{31}=")
+vm_ip = _vulnbox.get("ip", "")
 visualizer_url = os.getenv("VISUALIZER_URL", "http://127.0.0.1:1337")
 
-vm_ip_1 = "10.60.2.1"
-helper = '''
-10.61.5.1:1237 CyberUni 4
-10.61.5.1:1236 CyberUni 3
-10.61.5.1:1235 CyberUni 1
-10.61.5.1:1234 CyberUni 2
-10.60.5.1:3003 ClosedSea 1
-10.60.5.1:3004 ClosedSea 2
-10.62.5.1:5000 Trademark
-10.63.5.1:1337 RPN
-'''
+vm_ip_1 = vm_ip
 
-services = [{"ip": x.split(" ")[0].split(":")[0], "port": int(x.split(" ")[0].split(":")[1]), "name": " ".join(x.split(" ")[1:])} for x in helper.strip().split("\n")]
+services = []
+for svc in _services.get("services", []):
+    name = svc.get("name", "")
+    ports = svc.get("ports", [])
+    for port in ports:
+        services.append({"ip": vm_ip, "port": port, "name": f"{name}-{port}"})
 services += [{"ip": vm_ip_1, "port": -1, "name": "other"}]

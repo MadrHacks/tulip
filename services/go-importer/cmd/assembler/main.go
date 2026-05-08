@@ -2,6 +2,7 @@ package main
 
 import (
 	"go-importer/internal/converters"
+	"go-importer/internal/pkg/config"
 	"go-importer/internal/pkg/db"
 	"io/ioutil"
 	"runtime"
@@ -219,34 +220,27 @@ func main() {
 		}
 	}
 
-	// get TICK_LENGTH
-	strticklength := os.Getenv("TICK_LENGTH")
-	if *ticklength == -1 && strticklength != "" {
-		zwi, err := strconv.ParseInt(strticklength, 10, 64)
-		if err != nil {
-			log.Println("Error: ", err)
-		} else {
-			*ticklength = int(zwi / 1000)
-		}
+	if *ticklength == -1 {
+		*ticklength = config.GameTickDurationSec()
+	}
+	if *ticklength == -1 {
+		log.Fatal("No tick length specified. Use -tick-length or provide game.yml config.")
 	}
 
-	// get Flag_LIFETIME
-	if strflaglifetime := os.Getenv("FLAG_LIFETIME"); *flaglifetime == -1 && strflaglifetime != "" {
-		zwi, err := strconv.Atoi(strflaglifetime)
-		if err != nil {
-			log.Println("Error: ", err)
-		} else {
-			*flaglifetime = zwi
-		}
+	if *flaglifetime == -1 {
+		*flaglifetime = config.GameFlagLifetimeTicks()
+	}
+	if *flaglifetime == -1 {
+		log.Fatal("No flag lifetime specified. Use -flag-lifetime or provide game.yml config.")
 	}
 
-	if *ticklength != -1 && *flaglifetime != -1 {
-		*flaglifetime *= *ticklength
-	}
+	*flaglifetime *= *ticklength
 
-	// get TICK_START
 	if *flagTickStartRaw == "" {
-		*flagTickStartRaw = os.Getenv("TICK_START")
+		*flagTickStartRaw = config.GameStart()
+	}
+	if *flagTickStartRaw == "" {
+		log.Fatal("No tick start time specified. Use -flag-tick-start or provide game.yml config.")
 	}
 	if *flagTickStartRaw != "" {
 		startTime, err := time.Parse("2006-01-02T15:04Z07:00", *flagTickStartRaw)
@@ -269,15 +263,15 @@ func main() {
 
 	workerPool = workerpool.New(*concurrentFlows)
 
-	// If no timescale connection string was supplied, use env variable
 	if *timescale == "" {
 		*timescale = os.Getenv("TIMESCALE")
 	}
+	if *timescale == "" {
+		log.Fatal("No timescale connection string specified. Use -timescale or TIMESCALE env var.")
+	}
 
-	// If no flag regex was supplied via cli, check the env
 	if *flag_regex == "" {
-		*flag_regex = os.Getenv("FLAG_REGEX")
-		// if that didn't work, warn the user and continue
+		*flag_regex = config.GameFlagRegex()
 		if *flag_regex == "" {
 			log.Print("WARNING; no flag regex found. No flag-in or flag-out tags will be applied.")
 		}
