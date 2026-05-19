@@ -45,6 +45,7 @@ var watch_dir = flag.String("dir", "", "Directory to watch for new pcaps")
 var timescale = flag.String("timescale", "", "Timescale connection string (e. g. postgres://usr:pwd@host:5432/tulip)")
 var flag_regex = flag.String("flag", "", "flag regex, used for flag in/out tagging")
 var pcap_over_ip = flag.String("pcap-over-ip", "", "PCAP-over-IP host + port (e.g. remote:1337)")
+var remote_capture_ip = flag.String("remote-capture-ip", "", "ad-capture broker host + port (e.g. vulnbox:19090) — pcap-NG-over-IP plus our Custom Blocks for decrypted TLS")
 var bpf = flag.String("bpf", "", "BPF filter")
 var nonstrict = flag.Bool("nonstrict", false, "Do not check strict TCP / FSM flags")
 
@@ -201,7 +202,7 @@ func main() {
 	defer util.Run()()
 
 	flag.Parse()
-	if flag.NArg() < 1 && *watch_dir == "" && *pcap_over_ip == "" {
+	if flag.NArg() < 1 && *watch_dir == "" && *pcap_over_ip == "" && *remote_capture_ip == "" {
 		log.Fatal("Usage: \n" +
 			"\t./go-importer <file0.pcap> ... <fileN.pcap> OR" +
 			"\t./go-importer --dir <watch_dir> OR" +
@@ -279,6 +280,10 @@ func main() {
 
 	if *pcap_over_ip == "" {
 		*pcap_over_ip = os.Getenv("PCAP_OVER_IP")
+	}
+
+	if *remote_capture_ip == "" {
+		*remote_capture_ip = os.Getenv("REMOTE_CAPTURE_IP")
 	}
 
 	// if flagid scans should be done
@@ -403,6 +408,21 @@ func main() {
 		service.HandlePcapUri(uri)
 	}
 
+	// ad-capture broker (gives us EPBs + Custom Blocks with decrypted TLS).
+	// Always runs in a goroutine — composable with PCAP_OVER_IP and watch_dir.
+	if *remote_capture_ip != "" {
+		go func() {
+			if strings.Contains(*remote_capture_ip, ",") {
+				addrs := strings.Split(*remote_capture_ip, ",")
+				for _, a := range addrs {
+					go connectAdCaptureStream(service, a)
+				}
+				select {} // park
+			}
+			connectAdCaptureStream(service, *remote_capture_ip)
+		}()
+	}
+
 	// If PCAP-over-IP was configured, connect to it
 	// NOTE: Configuring PCAP-over-IP ignores watch dir
 	if *pcap_over_ip != "" {
@@ -427,6 +447,12 @@ func main() {
 		// keep monitoring it for new files.
 		if *watch_dir != "" {
 			service.WatchDir(*watch_dir)
+		} else if *remote_capture_ip != "" {
+			// Only the broker is feeding us — keep the process alive so the
+			// background broker goroutine can run. Without this main() would
+			// return and the goroutine would be torn down before doing
+			// anything.
+			select {}
 		}
 	}
 }
