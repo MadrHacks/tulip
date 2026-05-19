@@ -26,5 +26,9 @@ WORKDIR /app
 COPY ./converters/helpers/requirements.txt ./converters/helpers/requirements.txt
 RUN python3 -m pip install -r ./converters/helpers/requirements.txt
 
+# Ship the converter sources alongside the binary so re-enabling them
+# (dropping --disable-converters in compose) doesn't need an image change.
+COPY ./converters/ ./converters/
+
 COPY --from=builder /build/assembler ./
 CMD ["./assembler"]
