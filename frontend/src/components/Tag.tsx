@@ -16,6 +16,9 @@ const tagHueMap: Record<string, number> = {
   blocked: 270, // Purple
   flag_out: 0, // Red
   flag_in: 120, // Green
+  // Decrypted TLS plaintext from ad-capture: distinct teal so it stands out
+  // from the auto-hashed greens/blues of regular service tags.
+  "tls-decrypted": 175,
 };
 
 export function tagToHue(tag: string) {

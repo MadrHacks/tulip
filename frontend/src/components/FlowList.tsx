@@ -188,6 +188,14 @@ export function FlowList() {
       dispatch(toggleFilterTag("flag-out"))
     }
   }, [availableTags]);
+  // Toggle the ad-capture "tls-decrypted" filter — quick way to show only
+  // flows that came through eBPF decryption.
+  useHotkeys('t', () => {
+    setShowFilters(true)
+    if ((availableTags ?? []).includes("tls-decrypted")) {
+      dispatch(toggleFilterTag("tls-decrypted"))
+    }
+  }, [availableTags]);
   useHotkeys('r', () => refetch());
 
   const [showFilters, setShowFilters] = useState(false);
