@@ -1,5 +1,6 @@
 #!/bin/env python
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,87 +21,154 @@ def _load(name):
 
 
 _game = _load("game")
-_vulnbox = _load("vulnbox")
 
-DELAY = 5  # DELAY from start of tick
+DELAY = 5
 tick_length = int(_game.get("tick_duration_sec", 120))
-start_date = _game.get("start", "")
-team_id = _vulnbox.get("ip", "")
-team_id_is_digit = team_id.isdigit()
-team_id_int = int(team_id) if team_id_is_digit else None
-flagid_endpoint = os.getenv("FLAGID_ENDPOINT", "http://localhost:8000/flagids.json")
+start_date = str(_game.get("start", "") or "")
+
+try:
+    team_id = int(_game.get("team_id"))
+except (TypeError, ValueError):
+    team_id = None
+
+flagid_endpoint = os.getenv("FLAGID_ENDPOINT") or str(_game.get("flag_ids_url", "") or "")
 flagid_scrape_enabled = os.getenv("FLAGID_SCRAPE", "") != ""
 
-client = None
 db = None
 if flagid_scrape_enabled:
-    print("STARTING FLAGIDS")
-    print("CONFIG:")
-    print("  DELAY: ", DELAY)
-    print("  TICK_LENGTH: ", tick_length)
-    print("  TICK_START: ", start_date)
-    print("  TIMESCALE: ", os.environ.get("TIMESCALE"))
-    print("  TEAM_ID: ", team_id)
-    print("  FLAGID_ENDPOINT: ", flagid_endpoint)
+    print("STARTING FLAGIDS", flush=True)
+    print("  TICK_LENGTH:", tick_length, flush=True)
+    print("  TICK_START :", start_date, flush=True)
+    print("  TEAM_ID    :", team_id, flush=True)
+    print("  ENDPOINT   :", flagid_endpoint, flush=True)
     db = psycopg_pool.ConnectionPool(os.environ["TIMESCALE"])
-    print("CONNECTION TO MONGO ESTABLISHED", flush=True)
+    print("CONNECTED TO TIMESCALE", flush=True)
 else:
     print("FLAGID SCRAPE DISABLED", flush=True)
 
 
-# get leaf nodes of a json data struct
-def get_leaf_nodes(data):
-    if isinstance(data, dict):
-        if team_id in data.keys():
-            yield from get_leaf_nodes(data[team_id])
-        elif team_id_is_digit and team_id_int in data.keys():
-            yield from get_leaf_nodes(data[team_id_int])
-        else:
-            for value in data.values():
-                yield from get_leaf_nodes(value)
-    elif isinstance(data, list):
-        if team_id in data or (team_id_is_digit and team_id_int in data):
-            yield
-        else:
-            for item in data:
-                print(item, end=" ", flush=True)
-                yield from get_leaf_nodes(item)
+def _leaf_values(node):
+    if node is None:
+        return
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from _leaf_values(v)
+    elif isinstance(node, (list, tuple)):
+        for v in node:
+            yield from _leaf_values(v)
     else:
-        # prevent id from being used as Flagids
-        yield data
+        yield node
+
+
+def _coerce(value):
+    if value is None or isinstance(value, bool):
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _team_to_int(raw):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        m = re.search(r"(\d+)$", str(raw))
+        return int(m.group(1)) if m else None
+
+
+def _round_to_int(raw):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return -1
+
+
+def parse_flagids(payload):
+    matched_structured = False
+
+    if isinstance(payload, dict):
+        for service, teams in payload.items():
+            if not isinstance(teams, dict):
+                continue
+            for raw_team, rounds in teams.items():
+                tid = _team_to_int(raw_team)
+                if team_id is not None and tid is not None and tid != team_id:
+                    continue
+                if isinstance(rounds, dict):
+                    for raw_round, entry in rounds.items():
+                        rnd = _round_to_int(raw_round)
+                        for content in _leaf_values(entry):
+                            c = _coerce(content)
+                            if c is not None:
+                                matched_structured = True
+                                yield (c, str(service), tid if tid is not None else -1, rnd)
+                else:
+                    for content in _leaf_values(rounds):
+                        c = _coerce(content)
+                        if c is not None:
+                            matched_structured = True
+                            yield (c, str(service), tid if tid is not None else -1, -1)
+
+    if not matched_structured:
+        for content in _leaf_values(payload):
+            c = _coerce(content)
+            if c is not None:
+                yield (c, "", -1, -1)
+
+
+def _request_url():
+    url = flagid_endpoint
+    if team_id is not None and "team=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}team={team_id}"
+    return url
 
 
 def update_flagids():
     assert db is not None
 
-    response = requests.get(flagid_endpoint)
-    rows = [(node,) for node in get_leaf_nodes(response.json()) if node is not None]
-    print("Updating flagids: ", time.time(), f"({len(rows)})", flush=True)
+    response = requests.get(_request_url(), timeout=10)
+    response.raise_for_status()
+
+    rows = sorted({row for row in parse_flagids(response.json())})
+    print("Updating flagids:", time.time(), f"({len(rows)})", flush=True)
+    if not rows:
+        return
 
     with db.connection() as conn:
         with conn.cursor() as cur:
-            cur.executemany("INSERT INTO flag_id (content) VALUES (%s)", rows)
+            cur.executemany(
+                """
+                INSERT INTO flag_id (content, service, team, round)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (content, service, team, round) DO NOTHING
+                """,
+                rows,
+            )
             conn.commit()
 
 
+def _sleep_until_next_tick():
+    if start_date:
+        try:
+            unixtime = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%S%z").timestamp()
+            into_tick = max(0.0, time.time() - unixtime) % tick_length
+            time.sleep((tick_length - into_tick) + DELAY)
+            return
+        except ValueError:
+            pass
+    time.sleep(tick_length)
+
+
 def main():
-    start_datetime = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%S%z")
-    unixtime = time.mktime(start_datetime.timetuple())
     while True:
         try:
             if flagid_scrape_enabled:
                 update_flagids()
-            crnt_time = time.time()
-            time_diff = max(0, crnt_time - unixtime)
-            wait = (
-                DELAY
-                + tick_length * (time_diff // tick_length)
-                + time_diff % tick_length
-            )
-            time.sleep(wait)
         except Exception as e:
-            print("ERROR: ", e, flush=True)
+            print("ERROR:", e, flush=True)
             time.sleep(10)
+            continue
+        _sleep_until_next_tick()
 
 
 if __name__ == "__main__":

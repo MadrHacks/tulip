@@ -79,75 +79,66 @@ function HexFlow({ flow }: { flow: FlowData }) {
   const hex = hexy(Buffer.from(flow.b64, "base64"), { format: "twos" });
   return <FlowContainer copyText={hex}>{hex}</FlowContainer>;
 }
-function highlightText(flowText: string, search_string: string, flag_string: string) {
-  if (flowText.length > MAX_LENGTH_FOR_HIGHLIGHT || (flag_string === "" && search_string === "")) {
-    return flowText
+function highlightText(
+  flowText: string,
+  search_string: string,
+  flag_string: string,
+  flagids: string[] = []
+) {
+  const flagidList = flagids.filter((f) => f !== "");
+  if (
+    flowText.length > MAX_LENGTH_FOR_HIGHLIGHT ||
+    (flag_string === "" && search_string === "" && flagidList.length === 0)
+  ) {
+    return flowText;
   }
   try {
     const searchClasses = "bg-orange-200 dark:bg-orange-800 dark:text-orange-100 rounded-sm";
     const flagClasses = "bg-red-200 dark:bg-red-800 dark:text-red-100 rounded-sm";
+    const flagidClasses = "bg-purple-200 dark:bg-purple-800 dark:text-purple-100 rounded-sm";
 
-    // Matches are stored as `[start index, end index]`.
-    // For some reason tsc compiler (during build) thinks that `x.index` can be undefined (no, it can't).
-    // I wasn't able to find a workaround for it so @ts-ignore it is...
-    // Other way would be `x.index ?? 0` but that seems like it is doing something more than fixing typescript issues.
-    // @ts-ignore
-    const flagMatches: [number, number][] = (
-      flag_string === ""
-        ? []
+    const flagidPattern = [...flagidList]
+      .sort((a, b) => b.length - a.length)
+      .map(escapeStringRegexp)
+      .join("|");
+
+    const highlighters: { regex: RegExp; className: string; priority: number }[] = [];
+    if (flag_string !== "")
+      highlighters.push({ regex: new RegExp(flag_string, "g"), className: flagClasses, priority: 3 });
+    if (flagidPattern !== "")
+      highlighters.push({ regex: new RegExp(flagidPattern, "g"), className: flagidClasses, priority: 2 });
+    if (search_string !== "")
+      highlighters.push({ regex: new RegExp(search_string, "gi"), className: searchClasses, priority: 1 });
+
+    type Match = { start: number; end: number; className: string; priority: number };
+    const matches: Match[] = [];
+    for (const h of highlighters) {
+      for (const m of flowText.matchAll(h.regex)) {
+        if (m[0].length === 0) continue;
         // @ts-ignore
-        : [...flowText.matchAll(new RegExp(flag_string, "g"))].map(x => [x.index, x.index + x[0].length])
-    );
-    // @ts-ignore
-    const searchMatches: [number, number][] = (
-      search_string === ""
-        ? []
-        // @ts-ignore
-        : [...flowText.matchAll(new RegExp(search_string, "gi"))].map(x => [x.index, x.index + x[0].length])
-    );
+        const start: number = m.index;
+        matches.push({ start, end: start + m[0].length, className: h.className, priority: h.priority });
+      }
+    }
+
+    matches.sort((a, b) => a.start - b.start || b.priority - a.priority);
 
     let parts = [];
-    let currentIndex = 0, flagMatchIndex = 0, searchMatchIndex = 0;
-    while (true) {
-      // Pick next match
-      let isSearchMatch = null;
-      if (flagMatchIndex < flagMatches.length && searchMatchIndex < searchMatches.length) {
-        isSearchMatch = searchMatches[searchMatchIndex][0] <= flagMatches[flagMatchIndex][0];
-      } else if (searchMatchIndex < searchMatches.length) {
-        isSearchMatch = true;
-      } else if (flagMatchIndex < flagMatches.length) {
-        isSearchMatch = false;
+    let cursor = 0;
+    for (const match of matches) {
+      if (match.start < cursor) continue;
+      if (match.start > cursor) {
+        parts.push(<span key={cursor}>{flowText.slice(cursor, match.start)}</span>);
       }
-      let match = (
-        isSearchMatch === null
-          ? null
-          : isSearchMatch ? searchMatches[searchMatchIndex] : flagMatches[flagMatchIndex]
+      parts.push(
+        <span key={"m" + match.start} className={match.className}>
+          {flowText.slice(match.start, match.end)}
+        </span>
       );
-
-      // Produce element for remaining text if there is no match
-      if (match === null) {
-        parts.push(<span key={currentIndex}>{flowText.slice(currentIndex)}</span>);
-        break;
-      }
-
-      // Produce element for part between previous and next/current match
-      if (currentIndex != match[0]) {
-        parts.push(<span key={currentIndex}>{flowText.slice(currentIndex, match[0])}</span>);
-      }
-
-      // Produce element for current match
-      parts.push(<span key={match[0]} className={isSearchMatch ? searchClasses : flagClasses}>{flowText.slice(match[0], match[1])}</span>);
-
-      // Advance position to end of match
-      currentIndex = match[1];
-
-      // Advance "pointers" for flag matches
-      while (flagMatchIndex < flagMatches.length && flagMatches[flagMatchIndex][1] <= currentIndex) flagMatchIndex++;
-      // If current match ends in the middle of next match, we cut that overlaping part out
-      if (flagMatchIndex < flagMatches.length && flagMatches[flagMatchIndex][0] < currentIndex) flagMatches[flagMatchIndex][0] = currentIndex;
-      // Do the same also for search matches
-      while (searchMatchIndex < searchMatches.length && searchMatches[searchMatchIndex][1] <= currentIndex) searchMatchIndex++;
-      if (searchMatchIndex < searchMatches.length && searchMatches[searchMatchIndex][0] < currentIndex) searchMatches[searchMatchIndex][0] = currentIndex;
+      cursor = match.end;
+    }
+    if (cursor < flowText.length) {
+      parts.push(<span key={cursor}>{flowText.slice(cursor)}</span>);
     }
 
     return <span>{parts}</span>;
@@ -157,11 +148,11 @@ function highlightText(flowText: string, search_string: string, flag_string: str
   }
 }
 
-function TextFlow({ flow }: { flow: FlowData }) {
+function TextFlow({ flow, flagids }: { flow: FlowData; flagids: string[] }) {
   let [searchParams] = useSearchParams();
   const text_filter = searchParams.get(TEXT_FILTER_KEY);
   const { data: flag_regex } = useGetFlagRegexQuery();
-  const text = highlightText(flow.data, text_filter ?? "", flag_regex ?? "");
+  const text = highlightText(flow.data, text_filter ?? "", flag_regex ?? "", flagids);
 
   return <FlowContainer copyText={flow.data}>{text}</FlowContainer>;
 }
@@ -344,7 +335,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
         }
       >
         {displayOption === "Hex" && <HexFlow flow={flow}></HexFlow>}
-        {displayOption === "Plain" && <TextFlow flow={flow}></TextFlow>}
+        {displayOption === "Plain" && <TextFlow flow={flow} flagids={full_flow.flagids ?? []}></TextFlow>}
         {displayOption === "Web" && <WebFlow flow={flow}></WebFlow>}
         {displayOption === "PythonRequest" && (
           <PythonRequestFlow

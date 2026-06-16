@@ -595,6 +595,9 @@ func (db *Database) FingerprintsFlush() {
 type FlagId struct {
 	Id int32
 	Content string
+	Service string `db:"service"`
+	Team int32 `db:"team"`
+	Round int32 `db:"round"`
 	Time time.Time
 }
 

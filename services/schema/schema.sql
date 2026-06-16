@@ -23,7 +23,11 @@ INSERT INTO tag (name) VALUES
 CREATE TABLE flag_id (
 	id serial NOT NULL PRIMARY KEY,
 	content text NOT NULL,
-	time timestamptz NOT NULL DEFAULT now()
+	service text NOT NULL DEFAULT '',
+	team int NOT NULL DEFAULT -1,
+	round int NOT NULL DEFAULT -1,
+	time timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (content, service, team, round)
 );
 
 CREATE INDEX ON flag_id USING btree (content);
