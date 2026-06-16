@@ -25,6 +25,7 @@ _game = _load("game")
 DELAY = 5
 tick_length = int(_game.get("tick_duration_sec", 120))
 start_date = str(_game.get("start", "") or "")
+min_len = int(os.getenv("FLAGID_MIN_LEN", "4"))
 
 try:
     team_id = int(_game.get("team_id"))
@@ -64,7 +65,9 @@ def _coerce(value):
     if value is None or isinstance(value, bool):
         return None
     s = str(value).strip()
-    return s or None
+    if len(s) < min_len:
+        return None
+    return s
 
 
 def _team_to_int(raw):
