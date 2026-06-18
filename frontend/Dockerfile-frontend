@@ -1,16 +1,19 @@
-FROM node:24-alpine
-
-COPY package.json /app/
-COPY yarn.lock /app/
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
-RUN yarn
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
 
-COPY . /app/
-
+COPY . .
 RUN yarn run build
 
-EXPOSE 3000
+FROM nginx:1.27-alpine
 
-CMD ["yarn", "run", "preview", "--host", "--port", "3000"]
+ENV API_SERVER_ENDPOINT=http://tulip-api:5000/
+ENV NGINX_ENVSUBST_FILTER=API_SERVER_ENDPOINT
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 3000
