@@ -41,7 +41,11 @@ def convert(message):
 
 
 # convert a flow into pwn script
-def flow2pwn(flow: FlowDetail):
+def flow2pwn(flow: FlowDetail, kind: str = "raw", tls: bool = False):
+    remote_args = "HOST, {}".format(flow.port_dst)
+    if tls:
+        # pwntools wraps the socket in TLS; SNI defaults to HOST.
+        remote_args += ", ssl=True"
     script = """import json
 import sys
 
@@ -50,12 +54,12 @@ from pwn import *
 HOST = os.getenv('TARGET_IP')
 EXTRA = json.loads(os.getenv('TARGET_EXTRA', '[]'))
 
-proc = remote(HOST, {})
+proc = remote({})
 """.format(
-        flow.port_dst
+        remote_args
     )
 
-    for item in flow.kind_items():
+    for item in flow.kind_items(kind):
         if item.direction == "c":
             script += """proc.write(b"{}")\n""".format(convert(item.data))
 

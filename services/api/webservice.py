@@ -64,6 +64,12 @@ def return_text_response(object, **kwargs):
     return Response(object, mimetype="text/plain", **kwargs)
 
 
+def kind_is_tls(kind: str) -> bool:
+    # TLS-decrypted reps have kind "decrypted" (or "decrypted -> ..."); generated
+    # clients for them must speak TLS (https:// / ssl=True) to replay.
+    return kind.startswith("decrypted")
+
+
 @application.route("/")
 def hello_world():
     return "Hello, World!"
@@ -215,6 +221,8 @@ def convertToSingleRequest():
 
     flow_id = uuid.UUID(flow_id)
     item_index = int(item_index)
+    kind = request.args.get("kind", "raw")
+    tls = kind_is_tls(kind)
     with db.connection() as c:
         flow = c.flow_detail(flow_id)
     if not flow:
@@ -223,7 +231,7 @@ def convertToSingleRequest():
                 "Invalid flow", "Invalid flow id"
             )
         )
-    if item_index >= len(flow.items):
+    if item_index >= len(flow.kind_items(kind)):
         return return_text_response(
             "There was an error while converting the request:\n{}: {}".format(
                 "Invalid index", "Index out of range"
@@ -234,7 +242,7 @@ def convertToSingleRequest():
     use_requests_session = bool(request.args.get("use_requests_session", False))
     try:
         converted = convert_single_http_requests(
-            flow, item_index, tokenize, use_requests_session
+            flow, item_index, tokenize, use_requests_session, kind, tls
         )
     except Exception as ex:
         return return_text_response(
@@ -258,8 +266,12 @@ def convertToRequests(id):
         )
     tokenize = bool(request.args.get("tokenize", True))
     use_requests_session = bool(request.args.get("use_requests_session", True))
+    kind = request.args.get("kind", "raw")
+    tls = kind_is_tls(kind)
     try:
-        converted = convert_flow_to_http_requests(flow, tokenize, use_requests_session)
+        converted = convert_flow_to_http_requests(
+            flow, tokenize, use_requests_session, kind, tls
+        )
     except Exception as ex:
         return return_text_response(
             "There was an error while converting the request:\n{}: {}".format(
@@ -272,6 +284,8 @@ def convertToRequests(id):
 @application.route("/to_pwn/<id>")
 def confertToPwn(id):
     id = uuid.UUID(id)
+    kind = request.args.get("kind", "raw")
+    tls = kind_is_tls(kind)
     with db.connection() as c:
         flow = c.flow_detail(id)
     if not flow:
@@ -280,7 +294,7 @@ def confertToPwn(id):
                 "Invalid flow", "Invalid flow id"
             )
         )
-    return return_text_response(flow2pwn(flow))
+    return return_text_response(flow2pwn(flow, kind, tls))
 
 
 @application.route("/download/")

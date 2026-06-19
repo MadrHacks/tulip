@@ -69,6 +69,50 @@ If you have a lot of traffic (or you want to see traffic in real-time), you migh
 2. Set the `PCAP_OVER_IP` variable in the `.env` file to the IP of the vulnbox.
 3. Start the stack with `docker-compose up -d --build`.
 
+## TLS decryption
+
+Tulip can passively decrypt TLS (1.2 and 1.3, AEAD cipher suites) when you supply
+the session secrets. Since you control your own vulnbox, you can export those
+secrets as an [NSS key log](https://firefox-source-docs.mozilla.org/security/nss/legacy/key_log_format/index.html)
+(`SSLKEYLOGFILE` format) — the same mechanism Wireshark uses. The server's
+private key is *not* enough (and is useless for forward-secret / TLS 1.3
+traffic); you need the per-session secrets, keyed by `client_random`.
+
+How it works: the assembler watches a key-log file/directory, and for every TLS
+flow it has secrets for, it decrypts the records and adds the plaintext as a new
+**`decrypted`** representation (selectable in the flow view's decoder dropdown).
+Decrypted HTTPS is then parsed as HTTP just like cleartext (tags, decompression,
+flag/flagid scanning), and **"Copy as pwntools/requests"** on the `decrypted`
+representation emits a TLS-aware client (`remote(..., ssl=True)` /
+`https://` with `verify=False`).
+
+To enable it:
+
+1. On the vulnbox, make each service export an `SSLKEYLOGFILE`. Common ways:
+   - Apps using OpenSSL/BoringSSL/NSS honour the `SSLKEYLOGFILE` env var
+     (e.g. many Python, Node and Go services; curl; browsers).
+   - Go services: set `tls.Config.KeyLogWriter`.
+   - Otherwise, dump secrets with an eBPF tool such as
+     [eCapture](https://github.com/gojue/ecapture), or `LD_PRELOAD` shims.
+2. Ship the key log to the Tulip host (e.g. via `rsync`, alongside your pcaps).
+   The format is append-only and may grow live; the assembler tails it.
+3. Point `TLS_KEYLOG_HOST` in your `.env` at that file or directory (it defaults
+   to `./shared`, which is bind-mounted to the assembler) and restart:
+   `docker-compose up -d --build assembler`.
+
+Secrets do **not** have to arrive before the traffic. This is the normal case in
+practice: pcaps are usually ingested first and the key log is shipped a bit
+later. A TLS flow seen without its secrets is tagged `tls`, kept as ciphertext,
+and queued; as soon as the matching secrets appear in the key log, the assembler
+decrypts the stored flow in place and backfills the `decrypted` representation
+(plus HTTP parsing, flag/flagid scanning, etc.). This also survives a restart —
+queued flows are picked up against whatever secrets are already present.
+
+> Note: flows whose handshake wasn't captured (resumed sessions, or a capture
+> started mid-connection) can't be matched to a key and are left as ciphertext.
+> Only AEAD cipher suites are supported (the modern default); legacy CBC suites
+> and QUIC are not decrypted.
+
 ## Suricata synchronization
 
 ### Metadata

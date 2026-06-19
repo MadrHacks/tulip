@@ -10,6 +10,7 @@ package main
 
 import (
 	"go-importer/internal/pkg/db"
+	"go-importer/internal/pkg/tlsdecrypt"
 	"net/netip"
 
 	"sync"
@@ -46,6 +47,8 @@ func (factory *TcpStreamFactory) New(net, transport gopacket.Flow, tcp *layers.T
 		src_port:           tcp.SrcPort,
 		dst_port:           tcp.DstPort,
 		reassemblyCallback: factory.reassemblyCallback,
+		clientGap:          -1,
+		serverGap:          -1,
 	}
 	return stream
 }
@@ -80,6 +83,12 @@ type TcpStream struct {
 	dst_port           layers.TCPPort
 	total_size         int
 	num_packets        int
+	// Per-direction byte counters and the offset of the first lost-bytes gap
+	// (-1 = none), so TLS decryption can stop a direction at a hole.
+	clientBytes int
+	serverBytes int
+	clientGap   int
+	serverGap   int
 }
 
 func (t *TcpStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
@@ -101,7 +110,7 @@ func (t *TcpStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassem
 // so it's important to copy anything you need out of it,
 // especially bytes (or use KeepFrom())
 func (t *TcpStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
-	dir, _, _, _ := sg.Info()
+	dir, _, _, skip := sg.Info()
 	length, _ := sg.Lengths()
 	capInfo := ac.GetCaptureInfo()
 	timestamp := capInfo.Timestamp
@@ -126,11 +135,21 @@ func (t *TcpStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.Ass
 	data = data[:length]
 
 	var from string
+	gapOffset, byteCounter := &t.serverGap, &t.serverBytes
 	if dir == reassembly.TCPDirClientToServer {
 		from = "c"
+		gapOffset, byteCounter = &t.clientGap, &t.clientBytes
 	} else {
 		from = "s"
 	}
+
+	// skip > 0 means TCP bytes were lost before this segment; record the first
+	// such hole so TLS decryption stops the direction there. (skip == -1 is just
+	// an uncaptured stream start, handled gracefully, so not treated as a hole.)
+	if skip > 0 && *gapOffset < 0 {
+		*gapOffset = *byteCounter
+	}
+	*byteCounter += length
 
 	// consolidate subsequent elements from the same origin
 	l := len(t.FlowItems)
@@ -144,7 +163,7 @@ func (t *TcpStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.Ass
 
 	// Add a FlowItem based on the data we just reassembled
 	t.FlowItems = append(t.FlowItems, db.FlowItem{
-		Kind: "raw",
+		Kind: db.RawKind,
 		From: from,
 		Data: data,
 		Time: timestamp,
@@ -193,6 +212,29 @@ func (t *TcpStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
 		Size:        t.total_size,
 		Flags:       make([]string, 0),
 		Flagids:     make([]string, 0),
+	}
+
+	// Decrypt TLS if we have the secrets; the plaintext is appended as "decrypted"
+	// items that flow through the rest of the pipeline. If we don't have the keys
+	// yet, queue the flow for retroactive decryption (the common case).
+	if g_tlskeys != nil {
+		outcome := tlsdecrypt.Process(g_tlskeys, entry.Flow, t.clientGap, t.serverGap)
+		switch outcome.Status {
+		case tlsdecrypt.StatusDecrypted:
+			entry.Flow = append(entry.Flow, outcome.Items...)
+			entry.Tags = append(entry.Tags, "tls")
+		case tlsdecrypt.StatusNeedKey:
+			entry.Tags = append(entry.Tags, "tls")
+			entry.TlsPending = &db.TlsPendingInfo{
+				ClientRandom: outcome.ClientRandom,
+				ClientGap:    t.clientGap,
+				ServerGap:    t.serverGap,
+			}
+		case tlsdecrypt.StatusGiveUp:
+			// It is TLS, but we can't decrypt it (e.g. a CBC suite, or the
+			// handshake wasn't captured). Mark it so it's still filterable.
+			entry.Tags = append(entry.Tags, "tls")
+		}
 	}
 
 	t.reassemblyCallback(entry)

@@ -182,16 +182,19 @@ function PythonRequestFlow({
   full_flow,
   flow,
   item_index,
+  kind,
 }: {
   full_flow: FullFlow;
   flow: FlowData;
   item_index: number,
+  kind: string,
 }) {
   const { data } = useToSinglePythonRequestQuery({
     body: flow.b64,
     id: full_flow.id,
     item_index,
     tokenize: true,
+    kind,
   });
 
   return <FlowContainer copyText={data}>{data}</FlowContainer>;
@@ -203,6 +206,7 @@ interface FlowProps {
   flow_item_index: number;
   delta_time: number;
   id: string;
+  kind: string;
 }
 
 function detectType(flow: FlowData) {
@@ -225,7 +229,7 @@ function getFlowBody(flow: FlowData, flowType: string) {
   return null
 }
 
-function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
+function Flow({ full_flow, flow, flow_item_index, delta_time, id, kind }: FlowProps) {
   const formatted_time = format(new Date(flow.time), "HH:mm:ss:SSS");
   const displayOptions = flow.from === "s"
     ? ["Plain", "Hex", "Web"]
@@ -342,6 +346,7 @@ function Flow({ full_flow, flow, flow_item_index, delta_time, id }: FlowProps) {
             flow={flow}
             full_flow={full_flow}
             item_index={flow_item_index}
+            kind={kind}
           ></PythonRequestFlow>
         )}
       </div>
@@ -506,12 +511,17 @@ export function FlowView() {
 
   const { data: flow, isError, isLoading } = useGetFlowQuery(id!, { skip: id === undefined });
 
+  // Kind of the displayed representation; the copy-as clients operate on it, so a
+  // decrypted HTTPS flow yields a TLS-aware client instead of useless ciphertext.
+  const safeReprId = flow && reprId < flow.flow.length ? reprId : 0;
+  const selectedKind = flow?.flow[safeReprId]?.type ?? "raw";
+
   const [triggerPwnToolsQuery] = useLazyToPwnToolsQuery();
   const [triggerFullPythonRequestQuery] = useLazyToFullPythonRequestQuery();
 
   async function copyAsPwn() {
     if (flow?.id) {
-      const { data } = await triggerPwnToolsQuery(flow?.id);
+      const { data } = await triggerPwnToolsQuery({ id: flow.id, kind: selectedKind });
       console.log(data);
       return data || "";
     }
@@ -530,7 +540,7 @@ export function FlowView() {
 
   async function copyAsRequests() {
     if (flow?.id) {
-      const { data } = await triggerFullPythonRequestQuery(flow?.id);
+      const { data } = await triggerFullPythonRequestQuery({ id: flow.id, kind: selectedKind });
       return data || "";
     }
     return "";
@@ -700,6 +710,7 @@ export function FlowView() {
             flow_item_index={i}
             delta_time={delta_time}
             full_flow={flow}
+            kind={selectedKind}
             key={flow.id + "-" + i}
             id={flow.id + "-" + i}
           ></Flow>

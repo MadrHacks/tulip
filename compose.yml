@@ -78,6 +78,9 @@ services:
       - timescale
     volumes:
       - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
+      # NSS key log(s) for passive TLS decryption. Drop SSLKEYLOGFILE(s) here;
+      # an empty directory simply means no decryption.
+      - ${TLS_KEYLOG_HOST}:${TLS_KEYLOG_DOCKER}:ro,z
     # Command line flags most likely to fix a tulip issue:
     # - -http-session-tracking: enable HTTP session tracking
     # - -dir: directory to read traffic from
@@ -99,6 +102,7 @@ services:
       DUMP_PCAPS: ${DUMP_PCAPS}
       DUMP_PCAPS_INTERVAL: ${DUMP_PCAPS_INTERVAL}
       DUMP_PCAPS_FILENAME: ${DUMP_PCAPS_FILENAME}
+      TLS_KEYLOG: ${TLS_KEYLOG_DOCKER}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

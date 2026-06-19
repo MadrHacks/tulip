@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"go-importer/internal/pkg/db"
+	"go-importer/internal/pkg/tlsdecrypt"
 	"hash/crc32"
 	"io"
 	"net/http"
@@ -35,8 +36,9 @@ func ParseHttpFlow(g_db *db.Database, flow *db.FlowEntry) {
 
 	for i := range flow.Flow {
 		flowItem := &flow.Flow[i]
-		// Run only on raw representation
-		if flowItem.Kind != "raw" {
+		// Run on the raw representation and on TLS-decrypted plaintext, so that
+		// HTTPS flows get the same HTTP parsing/tagging as cleartext ones.
+		if flowItem.Kind != db.RawKind && flowItem.Kind != tlsdecrypt.DecryptedKind {
 			continue
 		}
 

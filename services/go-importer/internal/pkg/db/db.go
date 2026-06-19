@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log"
@@ -9,7 +8,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-	"math"
 
 	"github.com/gammazero/workerpool"
 	"github.com/gofrs/uuid/v5"
@@ -267,7 +265,14 @@ type FlowEntry struct {
 	Size         int `db:"packets_size"`
 	Flags_In     int `db:"flags_in"`
 	Flags_Out    int `db:"flags_out"`
+	// Transient: when set, FlowInsert records the flow in tls_pending so a later
+	// key arrival can backfill the decryption. Never persisted directly.
+	TlsPending   *TlsPendingInfo `db:"-"`
 }
+
+// RawKind is the Kind of an unprocessed (verbatim reassembled) flow item. Other
+// representations derive from it (e.g. tlsdecrypt.DecryptedKind, "raw -> ...").
+const RawKind = "raw"
 
 type FlowItem struct {
 	Id uuid.UUID
@@ -311,36 +316,15 @@ func (db *Database) FlowInsert(flow FlowEntry) {
 	// Generate flow id
 	flow_id := FidCreate(flow.Time)
 
-	// Prepare index rows
-	// These are split to chunks of maximum 1024 chars
-	// This is to ensure length of records is not too different
-	// between rows and to avoid rechecking large chunks of data
-	// in memory after a lossy index search has been used
-	chunkLength := 1024
-	chunkOverlap := 64
-	indexes := make([][]any, 0)
-	for _, item := range flow.Flow {
-		text := []rune(string(bytes.Replace(bytes.ToValidUTF8(item.Data, []byte{}), []byte{0}, []byte{}, -1)))
-		chunkCount := int(math.Ceil(float64(len(text)) / float64(chunkLength)))
-
-		// Each split between index rows has a 64 char overlap
-		// This is to accomodate searches hitting the boundary
-		for i := 0; i < chunkCount; i++ {
-			startIndex := i * chunkLength
-			endIndex := i * chunkLength + chunkLength + chunkOverlap
-			if endIndex >= len(text) {
-				endIndex = len(text)
-			}
-
-			chunk := string(text[startIndex:endIndex])
-			indexes = append(indexes, []any { flow_id, chunk })
-		}
+	// Queue TLS flows we couldn't decrypt yet for retroactive decryption.
+	if flow.TlsPending != nil {
+		db.TlsPendingInsert(flow_id, flow.TlsPending)
 	}
 
 	// Insert index rows
 	// This is async, since the index is not required to be peresent when we insert the flow
 	// At worst it will take a few seconds before this flow is searchable
-	db.batcherFlowIndex.PushAllCallback(indexes, func(errors <-chan error) {
+	db.batcherFlowIndex.PushAllCallback(buildIndexRows(flow_id, flow.Flow), func(errors <-chan error) {
 		// Error inserting flow indexes
 		if len(errors) != 0 {
 			log.Println("Error inserting flow indexes (flow will not be fully searchable): ", <-errors)
@@ -348,16 +332,7 @@ func (db *Database) FlowInsert(flow FlowEntry) {
 	})
 
 	// Prepare flow items
-	items := make([][]any, len(flow.Flow))
-	for i := range flow.Flow {
-		items[i] = []any {
-			FidCreate(flow.Flow[i].Time),
-			flow_id,
-			flow.Flow[i].Kind,
-			flow.Flow[i].From,
-			&flow.Flow[i].Data,
-		}
-	}
+	items := buildItemRows(flow_id, flow.Flow)
 
 	// Insert the flow items first, so that when flow is inserted, it is complete
 	db.batcherFlowItem.PushAllCallback(items, func(errors <-chan error) {

@@ -10,6 +10,7 @@ CREATE TABLE tag (
 INSERT INTO tag (name) VALUES
 	('tcp'),
 	('udp'),
+	('tls'),
 	('http'),
 	('flag-in'),
 	('flag-out'),
@@ -107,6 +108,18 @@ CREATE TABLE flow_index (
 	flow_id uuid NOT NULL,
 	text text NOT NULL
 );
+
+-- TLS flows seen before their session secrets arrived, awaiting retroactive
+-- decryption. Keyed by client_random so a later key-log update can find them.
+-- (Also created on demand by the assembler via EnsureTlsSchema.)
+CREATE TABLE tls_pending (
+	flow_id uuid PRIMARY KEY,
+	client_random bytea NOT NULL,
+	client_gap integer NOT NULL,
+	server_gap integer NOT NULL
+);
+
+CREATE INDEX ON tls_pending (client_random);
 
 -- Regex search, this one is chonky
 -- This is a GiST rather than GIN since GIN does not support sorting

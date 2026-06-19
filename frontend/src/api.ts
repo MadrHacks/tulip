@@ -133,17 +133,20 @@ export const tulipApi = createApi({
         }
       }),
     }),
-    toPwnTools: builder.query<string, string>({
-      query: (id) => ({ url: `/to_pwn/${id}`, responseHandler: "text" }),
+    toPwnTools: builder.query<string, { id: string; kind: string }>({
+      query: ({ id, kind }) => ({
+        url: `/to_pwn/${id}?kind=${encodeURIComponent(kind)}`,
+        responseHandler: "text",
+      }),
     }),
     toSinglePythonRequest: builder.query<
       string,
-      { body: string; id: string; item_index: number; tokenize: boolean }
+      { body: string; id: string; item_index: number; tokenize: boolean; kind: string }
     >({
-      query: ({ body, id, item_index, tokenize }) => ({
+      query: ({ body, id, item_index, tokenize, kind }) => ({
         url: `/to_single_python_request?tokenize=${
           tokenize ? "1" : "0"
-        }&id=${id}&index=${item_index}`,
+        }&id=${id}&index=${item_index}&kind=${encodeURIComponent(kind)}`,
         method: "POST",
         responseHandler: "text",
         headers: {
@@ -152,9 +155,9 @@ export const tulipApi = createApi({
         body,
       }),
     }),
-    toFullPythonRequest: builder.query<string, string>({
-      query: (id) => ({
-        url: `/to_python_request/${id}`,
+    toFullPythonRequest: builder.query<string, { id: string; kind: string }>({
+      query: ({ id, kind }) => ({
+        url: `/to_python_request/${id}?kind=${encodeURIComponent(kind)}`,
         responseHandler: "text",
       }),
     }),

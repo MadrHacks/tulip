@@ -16,7 +16,7 @@ func RunPipeline(g_db *db.Database, entry *db.FlowEntry) {
 
 	for _, converters := range config {
 		// Split flows into groups by their kinds
-		var flows map[string][]db.FlowItem
+		flows := make(map[string][]db.FlowItem)
 		for _, item := range entry.Flow {
 			_, ok := flows[item.Kind]
 			if !ok {
@@ -101,8 +101,12 @@ func TryConverter(converter string, entry *db.FlowEntry, flow []db.FlowItem) ([]
 			return
 		}
 
+		// Stamp the produced chunks with the flow's start time. (Was off-by-one:
+		// streamChunks[len] panicked out of bounds, swallowed by callers' recover.)
 		if len(flow) != 0 {
-			streamChunks[len(streamChunks)].Time = flow[0].Time
+			for i := range streamChunks {
+				streamChunks[i].Time = flow[0].Time
+			}
 		}
 
 		ch <- nil

@@ -4,6 +4,7 @@ import (
 	"go-importer/internal/converters"
 	"go-importer/internal/pkg/config"
 	"go-importer/internal/pkg/db"
+	"go-importer/internal/pkg/tlsdecrypt"
 	"io/ioutil"
 	"runtime"
 
@@ -87,8 +88,11 @@ var dumpPcapsFilename = flag.String("dump-pcaps-filename", "2006-01-02_15-04-05.
 Reference: https://pkg.go.dev/time#Layout`)
 var maxFlowItemSize = flag.Int("max-flow-item-size", 16, `Maximum size in MiB of one flow item record.
 While PostgreSQL technically supports values up to 1GiB, they are not very nice to work with.`)
+var tlsKeylog = flag.String("tls-keylog", "", `Path to an NSS key log file (SSLKEYLOGFILE format), or a directory of them,
+used to passively decrypt TLS traffic. Can also be set via the TLS_KEYLOG env var.`)
 
 var g_db *db.Database
+var g_tlskeys *tlsdecrypt.KeyLog
 var workerPool *workerpool.WorkerPool
 var flagValidator FlagValidator
 
@@ -102,6 +106,14 @@ func reassemblyCallback(entry db.FlowEntry) {
 	// we *really* don't want to end up in a situation where we don't get any packets ingested until the converter
 	// times out.
 	workerPool.Submit(func() {
+		// A malformed flow (e.g. a TLS edge case or a converter quirk) must not
+		// take down the whole assembler.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("WARN: recovered from panic while processing flow: %v", r)
+			}
+		}()
+
 		// Parsing HTTP will decode encodings to a plaintext format
 		ParseHttpFlow(g_db, &entry)
 
@@ -109,31 +121,38 @@ func reassemblyCallback(entry db.FlowEntry) {
 			converters.RunPipeline(g_db, &entry)
 		}
 
-		// Apply flag in / flagout
-		if *flag_regex != "" {
-			ApplyFlagTags(&entry, flag_regex, flagValidator)
-		}
-
-		// Apply flagid in / out
-		if *flagid {
-			unix := time.Now().Unix()
-			if flagidUpdate+int64(*ticklength) < unix {
-				flagidUpdate = unix
-				zwi, err := g_db.FlagIdsQuery(*flaglifetime)
-				if err != nil {
-					log.Fatal(err)
-				}
-				flagids = zwi
-			}
-			ApplyFlagids(&entry, flagids)
-		}
-
-		// Compute fuzzy hash for flow entry
-		ComputeFuzzyhash(&entry)
+		// Flag/flagid tagging + fuzzy hash (shared with the retroactive path)
+		scanFlagsAndHash(&entry)
 
 		// Finally, insert the new entry
 		g_db.FlowInsert(entry)
 	})
+}
+
+// scanFlagsAndHash applies flag/flagid tagging and the fuzzy hash. Shared by the
+// ingest path and the retroactive-decryption retry worker so they can't drift.
+func scanFlagsAndHash(entry *db.FlowEntry) {
+	if *flag_regex != "" {
+		ApplyFlagTags(entry, flag_regex, flagValidator)
+	}
+	if *flagid {
+		ensureFlagidsFresh()
+		ApplyFlagids(entry, flagids)
+	}
+	ComputeFuzzyhash(entry)
+}
+
+// ensureFlagidsFresh refreshes the cached flagids at most once per tick.
+func ensureFlagidsFresh() {
+	unix := time.Now().Unix()
+	if flagidUpdate+int64(*ticklength) < unix {
+		flagidUpdate = unix
+		zwi, err := g_db.FlagIdsQuery(*flaglifetime)
+		if err != nil {
+			log.Fatal(err)
+		}
+		flagids = zwi
+	}
 }
 
 type AssemblerService struct {
@@ -396,6 +415,17 @@ func main() {
 
 	if !*disableConverters {
 		converters.StartWorkers(*concurrentConverters)
+	}
+
+	// Enable passive TLS decryption if a key log was provided.
+	if *tlsKeylog == "" {
+		*tlsKeylog = os.Getenv("TLS_KEYLOG")
+	}
+	if *tlsKeylog != "" {
+		log.Println("TLS decryption enabled, reading key log from:", *tlsKeylog)
+		g_db.EnsureTlsSchema()
+		g_tlskeys = tlsdecrypt.NewKeyLog(*tlsKeylog)
+		startTlsRetryWorker()
 	}
 
 	// Pass positional arguments to the pcap handler

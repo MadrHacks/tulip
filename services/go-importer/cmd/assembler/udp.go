@@ -120,7 +120,7 @@ func (stream *UdpStream) ProcessSegment(flow gopacket.Flow, udp *layers.UDP, cap
 	}
 
 	stream.Items = append(stream.Items, db.FlowItem{
-		Kind: "raw",
+		Kind: db.RawKind,
 		From: from,
 		Data: udp.Payload[:length],
 		Time: captureInfo.Timestamp,

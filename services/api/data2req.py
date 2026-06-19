@@ -38,11 +38,16 @@ import os
 import sys
 
 import requests
+{% if tls %}import urllib3
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+{% endif %}
 HOST = os.getenv('TARGET_IP')
 EXTRA = json.loads(os.getenv('TARGET_EXTRA', '[]'))
 {% if use_requests_session %}
 s = requests.Session()
+{% if tls %}s.verify = False
+{% endif -%}
 {% endif -%}
 """
 
@@ -51,7 +56,7 @@ REQUEST_TEMPLATE = """
 {% if data -%}
 data = {{data}}
 {% endif -%}
-{{"res = " if print_info}}{{"s" if use_requests_session else "requests"}}.{{request_method}}(f"http://{HOST}:{{port}}" + {{request_path_repr}}{% if data %}, {{data_param_name}}=data{% endif %}{{ ", headers=headers" if not use_requests_session}})
+{{"res = " if print_info}}{{"s" if use_requests_session else "requests"}}.{{request_method}}(f"{{scheme}}://{HOST}:{{port}}" + {{request_path_repr}}{% if data %}, {{data_param_name}}=data{% endif %}{{ ", headers=headers" if not use_requests_session}}{% if tls and not use_requests_session %}, verify=False{% endif %})
 {% if print_info -%}
 print(res.text)
 print(res.status_code, res.headers)
@@ -151,12 +156,16 @@ def convert_single_http_requests(
     item_index: int,
     tokenize: bool = True,
     use_requests_session: bool = False,
+    kind: str = "raw",
+    tls: bool = False,
 ):
-    if not flow.items:
+    items = flow.kind_items(kind)
+    if not items or item_index >= len(items):
         return "No data"
 
+    scheme = "https" if tls else "http"
     request, data, data_param_name, headers = decode_http_request(
-        flow.items[item_index].data, tokenize
+        items[item_index].data, tokenize
     )
     if not request.path.startswith("/"):
         raise Exception("request path must start with / to be a valid HTTP request")
@@ -167,6 +176,7 @@ def convert_single_http_requests(
         HEADER_TEMPLATE,
         use_requests_session=use_requests_session,
         port=flow.port_dst,
+        tls=tls,
     ) + render(
         REQUEST_TEMPLATE,
         headers=repr(headers),
@@ -177,20 +187,28 @@ def convert_single_http_requests(
         use_requests_session=use_requests_session,
         port=flow.port_dst,
         print_info=True,
+        scheme=scheme,
+        tls=tls,
     )
 
 
 def convert_flow_to_http_requests(
-    flow: FlowDetail, tokenize: bool = True, use_requests_session: bool = True
+    flow: FlowDetail,
+    tokenize: bool = True,
+    use_requests_session: bool = True,
+    kind: str = "raw",
+    tls: bool = False,
 ):
     port = flow.port_dst
+    scheme = "https" if tls else "http"
     script = render(
         HEADER_TEMPLATE,
         use_requests_session=use_requests_session,
         port=port,
+        tls=tls,
     )
 
-    for item in flow.kind_items():
+    for item in flow.kind_items(kind):
         if item.direction == "c":
             request, data, data_param_name, headers = decode_http_request(
                 item.data, tokenize
@@ -212,6 +230,8 @@ def convert_flow_to_http_requests(
                 use_requests_session=use_requests_session,
                 port=port,
                 print_info=True,
+                scheme=scheme,
+                tls=tls,
             )
     return script
 
