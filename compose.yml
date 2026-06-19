@@ -5,9 +5,7 @@ services:
     restart: unless-stopped
     volumes:
     - timescale-data:/var/lib/postgresql/data
-    - ./services/schema/system.sql:/docker-entrypoint-initdb.d/100_system.sql:ro
-    - ./services/schema/functions.sql:/docker-entrypoint-initdb.d/101_functions.sql:ro
-    - ./services/schema/schema.sql:/docker-entrypoint-initdb.d/102_schema.sql:ro
+    # Schema is baked into the image (services/timescale/schema -> initdb.d).
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_USER: tulip
@@ -125,7 +123,7 @@ services:
       - redis
     restart: unless-stopped
     volumes:
-      - ./suricata.rules:/var/lib/suricata/rules/suricata.rules:ro
+      # Rules are baked into the image (services/suricata/suricata.rules).
       - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro,z
     environment:
       PCAP_OVER_IP: ${PCAP_OVER_IP}
