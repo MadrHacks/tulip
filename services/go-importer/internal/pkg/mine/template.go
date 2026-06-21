@@ -32,6 +32,11 @@ func (s SlotType) String() string {
 	}
 }
 
+// MarshalJSON encodes a slot type as its name.
+func (s SlotType) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
 // extractSlotValues returns member's bytes in each variable slot of the
 // template, located by the constant anchors in order. Returns nil if an anchor
 // is missing (member does not fit the template).
@@ -100,8 +105,8 @@ func classifySlot(values [][]byte, flagRe *regexp.Regexp, flagIDs map[string]boo
 // Template is a synthesized, typed request template for a cluster: the aligned
 // segments plus a type for each variable slot, in order.
 type Template struct {
-	Segments []Segment
-	Slots    []SlotType
+	Segments []Segment  `json:"segments"`
+	Slots    []SlotType `json:"slots"`
 }
 
 func countVarSegments(segs []Segment) int {

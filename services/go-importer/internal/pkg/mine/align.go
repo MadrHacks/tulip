@@ -5,8 +5,8 @@ import "bytes"
 // Segment is one piece of an aligned template: either a run of constant bytes
 // shared by every member, or a variable slot where members differ.
 type Segment struct {
-	Const []byte // the constant bytes (nil/empty when Var)
-	Var   bool   // true = a slot that differs across members
+	Const []byte `json:"const,omitempty"` // constant bytes (nil/empty when Var)
+	Var   bool   `json:"var,omitempty"`   // true = a slot that differs across members
 }
 
 // token is a contiguous slice of one member's bytes.

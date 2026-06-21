@@ -33,6 +33,9 @@ type Engine struct {
 	flagIDs        []string
 	flagIDsAt      time.Time
 	lastSnapshotAt time.Time
+
+	templatedAt map[string]int
+	lastSynthAt time.Time
 }
 
 func New(database *db.Database, cfg Config) *Engine {
@@ -43,6 +46,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		serviceByPort: config.ServiceByPort(),
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
+		templatedAt:   map[string]int{},
 	}
 }
 
@@ -74,6 +78,7 @@ func (e *Engine) Run(ctx context.Context) {
 			e.saveCursor(ctx, cursor)
 		}
 		e.maybeSnapshot(ctx)
+		e.maybeSynthesize(ctx)
 
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.

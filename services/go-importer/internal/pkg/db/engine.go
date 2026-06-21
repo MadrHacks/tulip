@@ -58,3 +58,37 @@ func (db *Database) FlowClientData(flowId uuid.UUID) ([]byte, error) {
 	}
 	return raw, nil
 }
+
+// ClusterMemberData returns the client plaintext of up to limit recent flows
+// carrying the given tag (e.g. "cluster:CCalendar:7"), within the horizon.
+func (db *Database) ClusterMemberData(tag string, horizonSecs float64, limit int) ([][]byte, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT id FROM flow
+		WHERE tags ? $1
+			AND id > fid_pack_low(now() - make_interval(secs => $2))
+		ORDER BY id DESC
+		LIMIT $3
+	`, tag, horizonSecs, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	var out [][]byte
+	for _, id := range ids {
+		data, err := db.FlowClientData(id)
+		if err == nil && len(data) > 0 {
+			out = append(out, data)
+		}
+	}
+	return out, nil
+}
