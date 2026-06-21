@@ -176,6 +176,13 @@ def getTemplateScaffold(service, cluster_id):
     return return_text_response(render_scaffold(body, service=service))
 
 
+@application.route("/heat")
+def getHeat():
+    with db.connection() as c:
+        heat = c.heat_summaries()
+    return return_json_response(heat)
+
+
 @application.route("/chains")
 def getChains():
     with db.connection() as c:

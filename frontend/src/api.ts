@@ -14,6 +14,7 @@ import {
   Cluster,
   ClusterTemplate,
   Chain,
+  Heat,
 } from "./types";
 
 function base64DecodeUnicode(str: string) : string {
@@ -217,6 +218,9 @@ export const tulipApi = createApi({
     getChains: builder.query<Chain[], void>({
       query: () => "/chains",
     }),
+    getHeat: builder.query<Record<string, Heat>, void>({
+      query: () => "/heat",
+    }),
     getChainBody: builder.query<unknown, number>({
       query: (chainId) => `/chain/${chainId}`,
     }),
@@ -258,6 +262,7 @@ export const {
   useLazyGetTemplateScaffoldQuery,
   useGetChainsQuery,
   useGetChainBodyQuery,
+  useGetHeatQuery,
   useFlowTagMutation,
   useFlowsTagBulkMutation,
 } = tulipApi;

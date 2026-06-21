@@ -129,3 +129,10 @@ export interface Chain {
   links: number;
   runnable: boolean;
 }
+
+export interface Heat {
+  our_lost: number;
+  our_stolen: number;
+  total_stolen: number;
+  our_sla_ok: boolean;
+}

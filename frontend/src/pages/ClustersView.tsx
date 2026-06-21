@@ -2,12 +2,13 @@ import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppDispatch } from "../store";
 import { toggleFilterTag } from "../store/filter";
-import { useGetClustersQuery, useGetTemplatesQuery } from "../api";
+import { useGetClustersQuery, useGetTemplatesQuery, useGetHeatQuery } from "../api";
 import { Tag } from "../components/Tag";
 
 export function ClustersView() {
   const { data: clusters = [] } = useGetClustersQuery();
   const { data: templates = [] } = useGetTemplatesQuery();
+  const { data: heat = {} } = useGetHeatQuery();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -38,6 +39,8 @@ export function ClustersView() {
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flows</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flag out</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flag in</th>
+              <th className="px-3 py-2 text-center text-secondary font-semibold">SLA</th>
+              <th className="px-3 py-2 text-center text-secondary font-semibold">Lost</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Template</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Tag</th>
             </tr>
@@ -63,6 +66,26 @@ export function ClustersView() {
                   {cluster.flag_in > 0 && (
                     <span className="inline-block px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
                       {cluster.flag_in}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  {heat[cluster.service] && (
+                    <span
+                      className={
+                        heat[cluster.service].our_sla_ok
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-600 dark:text-red-400 font-semibold"
+                      }
+                    >
+                      {heat[cluster.service].our_sla_ok ? "ok" : "down"}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  {heat[cluster.service]?.our_lost > 0 && (
+                    <span className="inline-block px-2 py-0.5 rounded bg-orange-500/20 text-orange-600 dark:text-orange-400">
+                      {heat[cluster.service].our_lost}
                     </span>
                   )}
                 </td>

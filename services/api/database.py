@@ -419,6 +419,23 @@ class Connection(psycopg.Connection):
             ).fetchone()
         return row["body"] if row else None
 
+    def heat_summaries(self) -> dict[str, dict]:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.heat') AS t").fetchone()["t"] is None:
+                return {}
+            rows = cursor.execute(
+                "SELECT service, our_lost, our_stolen, total_stolen, our_sla_ok FROM mine.heat"
+            ).fetchall()
+        return {
+            row["service"]: {
+                "our_lost": row["our_lost"],
+                "our_stolen": row["our_stolen"],
+                "total_stolen": row["total_stolen"],
+                "our_sla_ok": row["our_sla_ok"],
+            }
+            for row in rows
+        }
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)
