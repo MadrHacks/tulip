@@ -31,12 +31,18 @@ var volatileHeaders = map[string]bool{
 	"Upgrade-Insecure-Requests": true,
 }
 
+// canonical returns the unmasked canonical request (HTTP structural form, or the
+// raw bytes for non-HTTP). Template synthesis diffs cluster members on this.
+func canonical(clientData []byte) []byte {
+	if canon, ok := httpRequestCanon(clientData); ok {
+		return canon
+	}
+	return clientData
+}
+
 // Normalize returns the masked canonical request for clustering.
 func Normalize(clientData []byte, flagRe *regexp.Regexp, flagIDs []string) []byte {
-	if canon, ok := httpRequestCanon(clientData); ok {
-		return maskValues(canon, flagRe, flagIDs)
-	}
-	return maskValues(clientData, flagRe, flagIDs)
+	return maskValues(canonical(clientData), flagRe, flagIDs)
 }
 
 func maskValues(data []byte, flagRe *regexp.Regexp, flagIDs []string) []byte {

@@ -96,3 +96,47 @@ func classifySlot(values [][]byte, flagRe *regexp.Regexp, flagIDs map[string]boo
 		return SlotUnknown
 	}
 }
+
+// Template is a synthesized, typed request template for a cluster: the aligned
+// segments plus a type for each variable slot, in order.
+type Template struct {
+	Segments []Segment
+	Slots    []SlotType
+}
+
+func countVarSegments(segs []Segment) int {
+	n := 0
+	for _, s := range segs {
+		if s.Var {
+			n++
+		}
+	}
+	return n
+}
+
+// synthesize builds a typed template from a cluster's member requests (unmasked
+// canonical forms). Returns nil with fewer than coreQuorum members or no shape.
+func synthesize(members [][]byte, flagRe *regexp.Regexp, flagIDs map[string]bool) *Template {
+	if len(members) < coreQuorum {
+		return nil
+	}
+	segs := Align(members)
+	nSlots := countVarSegments(segs)
+
+	perSlot := make([][][]byte, nSlots)
+	for _, m := range members {
+		vals := extractSlotValues(m, segs)
+		if len(vals) != nSlots {
+			continue
+		}
+		for i, v := range vals {
+			perSlot[i] = append(perSlot[i], v)
+		}
+	}
+
+	slots := make([]SlotType, nSlots)
+	for i := range slots {
+		slots[i] = classifySlot(perSlot[i], flagRe, flagIDs)
+	}
+	return &Template{Segments: segs, Slots: slots}
+}

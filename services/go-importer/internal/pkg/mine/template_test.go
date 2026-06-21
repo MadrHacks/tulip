@@ -55,3 +55,31 @@ func TestClassifySlot(t *testing.T) {
 		}
 	}
 }
+
+func TestSynthesize(t *testing.T) {
+	flagRe := regexp.MustCompile(`[A-Z0-9]{31}=`)
+	members := [][]byte{
+		[]byte("GET /note/1 HTTP"),
+		[]byte("GET /note/2 HTTP"),
+		[]byte("GET /note/3 HTTP"),
+	}
+	tpl := synthesize(members, flagRe, map[string]bool{})
+	if tpl == nil {
+		t.Fatal("synthesize returned nil")
+	}
+	if countVarSegments(tpl.Segments) != len(tpl.Slots) {
+		t.Fatalf("slots %d != var segments %d", len(tpl.Slots), countVarSegments(tpl.Segments))
+	}
+	if len(tpl.Slots) != 1 {
+		t.Fatalf("expected 1 slot, got %d", len(tpl.Slots))
+	}
+	if tpl.Slots[0] != SlotUnknown {
+		t.Errorf("slot = %v, want unknown (small ints)", tpl.Slots[0])
+	}
+}
+
+func TestSynthesizeTooFew(t *testing.T) {
+	if synthesize([][]byte{[]byte("a"), []byte("b")}, nil, nil) != nil {
+		t.Error("expected nil below quorum")
+	}
+}
