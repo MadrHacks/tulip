@@ -7,19 +7,39 @@ package mine
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"regexp"
 	"time"
 
+	"go-importer/internal/pkg/config"
 	"go-importer/internal/pkg/db"
 )
+
+const flagIDRefresh = 30 * time.Second
 
 type Engine struct {
 	db  *db.Database
 	cfg Config
+
+	shards        map[string]*clusterStore
+	serviceByPort map[int]string
+	flagRe        *regexp.Regexp
+	flagLifetime  int
+
+	flagIDs   []string
+	flagIDsAt time.Time
 }
 
 func New(database *db.Database, cfg Config) *Engine {
-	return &Engine{db: database, cfg: cfg}
+	return &Engine{
+		db:            database,
+		cfg:           cfg,
+		shards:        map[string]*clusterStore{},
+		serviceByPort: config.ServiceByPort(),
+		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
+		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
+	}
 }
 
 func (e *Engine) Run(ctx context.Context) {
@@ -31,6 +51,7 @@ func (e *Engine) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		e.refreshFlagIDs()
 
 		flows, err := e.readBatch(ctx, cursor)
 		if err != nil {
@@ -56,5 +77,53 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// handle is the per-flow entry point; analysis stages are added in later phases.
-func (e *Engine) handle(f *Flow) {}
+// handle clusters one flow and tags it with its cluster identity.
+func (e *Engine) handle(f *Flow) {
+	data, err := e.db.FlowClientData(f.Id)
+	if err != nil {
+		log.Println("minecore: client data:", err)
+		return
+	}
+	if len(data) == 0 {
+		return
+	}
+
+	canon := Normalize(data, e.flagRe, e.flagIDs)
+	sig, _ := Featurize(canon)
+
+	service := e.serviceName(f.DstPort)
+	store := e.shards[service]
+	if store == nil {
+		store = newClusterStore()
+		e.shards[service] = store
+	}
+	id, _ := store.Assign(sig)
+
+	e.db.FlowAddTags(f.Id, []string{fmt.Sprintf("cluster:%s:%d", service, id)})
+}
+
+func (e *Engine) serviceName(port int) string {
+	if n := e.serviceByPort[port]; n != "" {
+		return n
+	}
+	return "other"
+}
+
+// refreshFlagIDs reloads the live flagId set used for masking, at most once per
+// flagIDRefresh interval.
+func (e *Engine) refreshFlagIDs() {
+	if !e.flagIDsAt.IsZero() && time.Since(e.flagIDsAt) < flagIDRefresh {
+		return
+	}
+	ids, err := e.db.FlagIdsQuery(e.flagLifetime)
+	if err != nil {
+		log.Println("minecore: flagids:", err)
+		return
+	}
+	contents := make([]string, 0, len(ids))
+	for _, x := range ids {
+		contents = append(contents, x.Content)
+	}
+	e.flagIDs = contents
+	e.flagIDsAt = time.Now()
+}
