@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/netip"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5"
@@ -25,12 +26,13 @@ type Flow struct {
 	Fuzzyhash string
 	FlagsIn   int
 	FlagsOut  int
+	Time      time.Time
 }
 
 // readBatch reads the next flows after cursor, never reaching past the horizon.
 func (e *Engine) readBatch(ctx context.Context, cursor uuid.UUID) ([]Flow, error) {
 	rows, err := e.db.Pool().Query(ctx, `
-		SELECT id, port_dst, ip_dst, ip_src, tags, flags, flagids, fuzzyhash, flags_in, flags_out
+		SELECT id, port_dst, ip_dst, ip_src, tags, flags, flagids, fuzzyhash, flags_in, flags_out, time
 		FROM flow
 		WHERE id > @cursor
 			AND id > fid_pack_low(now() - make_interval(secs => @horizon))
@@ -51,7 +53,7 @@ func (e *Engine) readBatch(ctx context.Context, cursor uuid.UUID) ([]Flow, error
 		var f Flow
 		var tags, flags, flagids []byte
 		if err := rows.Scan(&f.Id, &f.DstPort, &f.DstIP, &f.SrcIP, &tags, &flags, &flagids,
-			&f.Fuzzyhash, &f.FlagsIn, &f.FlagsOut); err != nil {
+			&f.Fuzzyhash, &f.FlagsIn, &f.FlagsOut, &f.Time); err != nil {
 			return nil, err
 		}
 		json.Unmarshal(tags, &f.Tags)

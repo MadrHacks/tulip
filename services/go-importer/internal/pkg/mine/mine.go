@@ -27,6 +27,7 @@ type Engine struct {
 	cfg Config
 
 	shards        map[string]*clusterStore
+	calibrators   map[string]*Calibrator
 	serviceByPort map[int]string
 	flagRe        *regexp.Regexp
 	flagLifetime  int
@@ -45,6 +46,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		db:            database,
 		cfg:           cfg,
 		shards:        map[string]*clusterStore{},
+		calibrators:   map[string]*Calibrator{},
 		serviceByPort: config.ServiceByPort(),
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
@@ -114,6 +116,7 @@ func (e *Engine) handle(f *Flow) {
 	id, _ := store.Assign(sig)
 
 	e.db.FlowAddTags(f.Id, []string{fmt.Sprintf("cluster:%s:%d", service, id)})
+	e.tagRole(f, service)
 }
 
 func (e *Engine) serviceName(port int) string {
