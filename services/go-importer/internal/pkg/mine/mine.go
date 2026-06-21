@@ -141,7 +141,7 @@ func (e *Engine) observeChain(f *Flow, clusterTag string, clientData []byte) {
 		return
 	}
 	e.chains.Observe(
-		f.Id.String(), f.Time.Unix(), clusterTag,
+		f.Id.String(), f.Time.Unix(), f.DstPort, clusterTag,
 		ExtractTokens(serverData), ExtractTokens(clientData),
 	)
 }

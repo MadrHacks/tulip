@@ -10,12 +10,19 @@ type timedEdge struct {
 }
 
 // settledChain is an emitted multi-step exploit chain: a settled session of
-// flows linked by value reuse, ready to persist and tag.
+// flows linked by value reuse, ready to persist and tag. StepFlows and StepPorts
+// run parallel to Template.Steps; LinkValues runs parallel to Template.Links and
+// holds each link's observed value bytes, the instance data a lowering stage
+// needs to synthesize extract/inject locators (kept out of the reusable
+// Template).
 type settledChain struct {
-	ID        int64
-	Signature string
-	Members   []string
-	Template  ChainTemplate
+	ID         int64
+	Signature  string
+	Members    []string
+	Template   ChainTemplate
+	StepFlows  []string
+	StepPorts  []int
+	LinkValues [][]byte
 }
 
 // chainAnalyzer induces multi-step exploit sessions from cross-flow value reuse.
@@ -32,6 +39,7 @@ type chainAnalyzer struct {
 	maxSize  int
 
 	flowMeta map[string]SessionFlow
+	flowPort map[string]int
 	edges    []timedEdge
 	maxT     int64
 }
@@ -43,13 +51,15 @@ func newChainAnalyzer(windowSec int64, dfMax, maxSize int) *chainAnalyzer {
 		window:   windowSec,
 		maxSize:  maxSize,
 		flowMeta: map[string]SessionFlow{},
+		flowPort: map[string]int{},
 	}
 }
 
 // Observe feeds one flow's produced (server->client) and consumed (client->
 // server) high-entropy tokens into the value graph and records the flow's
-// single-flow cluster identity. Flows carrying no tokens are ignored.
-func (a *chainAnalyzer) Observe(flow string, t int64, clusterID string, produced, consumed [][]byte) {
+// single-flow cluster identity and service port. Flows carrying no tokens are
+// ignored.
+func (a *chainAnalyzer) Observe(flow string, t int64, port int, clusterID string, produced, consumed [][]byte) {
 	if len(produced) == 0 && len(consumed) == 0 {
 		return
 	}
@@ -57,6 +67,7 @@ func (a *chainAnalyzer) Observe(flow string, t int64, clusterID string, produced
 		a.maxT = t
 	}
 	a.flowMeta[flow] = SessionFlow{Flow: flow, ClusterID: clusterID, T: t}
+	a.flowPort[flow] = port
 	for _, v := range produced {
 		a.vdg.Observe(flow, t, true, v)
 	}
@@ -127,11 +138,38 @@ func (a *chainAnalyzer) Synthesize() []settledChain {
 		}
 		sig := SessionSignature(flows, edges)
 		id, _ := a.clusters.Assign(sig)
+		tmpl := BuildChainTemplate(flows, edges)
+
+		ordered := append([]SessionFlow(nil), flows...)
+		sort.Slice(ordered, func(i, j int) bool {
+			if ordered[i].T != ordered[j].T {
+				return ordered[i].T < ordered[j].T
+			}
+			return ordered[i].Flow < ordered[j].Flow
+		})
+		stepFlows := make([]string, len(ordered))
+		stepPorts := make([]int, len(ordered))
+		for i, f := range ordered {
+			stepFlows[i] = f.Flow
+			stepPorts[i] = a.flowPort[f.Flow]
+		}
+		valueByVhash := make(map[uint64][]byte, len(edges))
+		for _, e := range edges {
+			valueByVhash[e.Vhash] = e.Value
+		}
+		linkValues := make([][]byte, len(tmpl.Links))
+		for i, l := range tmpl.Links {
+			linkValues[i] = valueByVhash[l.Vhash]
+		}
+
 		out = append(out, settledChain{
-			ID:        id,
-			Signature: sig,
-			Members:   members,
-			Template:  BuildChainTemplate(flows, edges),
+			ID:         id,
+			Signature:  sig,
+			Members:    members,
+			Template:   tmpl,
+			StepFlows:  stepFlows,
+			StepPorts:  stepPorts,
+			LinkValues: linkValues,
 		})
 		for _, f := range members {
 			evict[f] = true
@@ -149,6 +187,7 @@ func (a *chainAnalyzer) Synthesize() []settledChain {
 		a.edges = kept
 		for f := range evict {
 			delete(a.flowMeta, f)
+			delete(a.flowPort, f)
 		}
 	}
 	return out
@@ -170,6 +209,7 @@ func (a *chainAnalyzer) evictBefore(cutoff int64) {
 	for f, meta := range a.flowMeta {
 		if meta.T < cutoff {
 			delete(a.flowMeta, f)
+			delete(a.flowPort, f)
 		}
 	}
 }

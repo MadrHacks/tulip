@@ -4,11 +4,13 @@ import "math"
 
 // Edge is a cross-flow value-dataflow link: a high-entropy value first produced
 // in flow Src (a server response) and later reused in a different flow Dst (a
-// client request). Vhash identifies the value.
+// client request). Vhash identifies the value; Value is the value bytes, kept so
+// a settled chain can be lowered to runnable extract/inject locators.
 type Edge struct {
 	Src   string
 	Dst   string
 	Vhash uint64
+	Value []byte
 }
 
 // occ is a single in-window observation of a value in some flow.
@@ -79,7 +81,10 @@ func (g *VDG) Observe(flow string, tSec int64, produced bool, value []byte) []Ed
 			}
 		}
 		if found {
-			edges = []Edge{{Src: bestFlow, Dst: flow, Vhash: h}}
+			edges = []Edge{{
+				Src: bestFlow, Dst: flow, Vhash: h,
+				Value: append([]byte(nil), value...),
+			}}
 		}
 	}
 

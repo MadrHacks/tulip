@@ -9,8 +9,8 @@ func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
 	a := newChainAnalyzer(100, 8, 16)
 
 	// flowA mints tokA; flowB reuses it -> a producer->consumer edge.
-	a.Observe("flowA", 10, "cluster:svc:1", [][]byte{tokA}, nil)
-	a.Observe("flowB", 20, "cluster:svc:2", nil, [][]byte{tokA})
+	a.Observe("flowA", 10, 8001, "cluster:svc:1", [][]byte{tokA}, nil)
+	a.Observe("flowB", 20, 8002, "cluster:svc:2", nil, [][]byte{tokA})
 
 	// Not settled yet: the newest member is within one window of the data clock.
 	if got := a.Synthesize(); len(got) != 0 {
@@ -18,7 +18,7 @@ func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
 	}
 
 	// Advance the data clock well past the window with an unrelated flow.
-	a.Observe("flowC", 200, "cluster:svc:3", [][]byte{tokB}, nil)
+	a.Observe("flowC", 200, 8003, "cluster:svc:3", [][]byte{tokB}, nil)
 
 	chains := a.Synthesize()
 	if len(chains) != 1 {
@@ -37,6 +37,16 @@ func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
 	if sc.Template.Steps[0].ClusterID != "cluster:svc:1" {
 		t.Errorf("step 0 cluster = %q, want cluster:svc:1", sc.Template.Steps[0].ClusterID)
 	}
+	// Step metadata runs parallel to the template steps, in (T, Flow) order.
+	if !reflect.DeepEqual(sc.StepFlows, []string{"flowA", "flowB"}) {
+		t.Errorf("step flows = %v, want [flowA flowB]", sc.StepFlows)
+	}
+	if !reflect.DeepEqual(sc.StepPorts, []int{8001, 8002}) {
+		t.Errorf("step ports = %v, want [8001 8002]", sc.StepPorts)
+	}
+	if len(sc.LinkValues) != 1 || !reflect.DeepEqual(sc.LinkValues[0], tokA) {
+		t.Errorf("link values = %q, want [%q]", sc.LinkValues, tokA)
+	}
 
 	// The session is evicted on emit, so a second pass yields nothing.
 	if got := a.Synthesize(); len(got) != 0 {
@@ -46,7 +56,7 @@ func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
 
 func TestChainAnalyzerIgnoresTokenlessFlows(t *testing.T) {
 	a := newChainAnalyzer(100, 8, 16)
-	a.Observe("flowA", 10, "cluster:svc:1", nil, nil)
+	a.Observe("flowA", 10, 8001, "cluster:svc:1", nil, nil)
 	if len(a.flowMeta) != 0 {
 		t.Errorf("token-less flow should not be recorded, have %d", len(a.flowMeta))
 	}
@@ -58,8 +68,8 @@ func TestChainAnalyzerIgnoresTokenlessFlows(t *testing.T) {
 func TestChainAnalyzerSingleFlowNoChain(t *testing.T) {
 	a := newChainAnalyzer(100, 8, 16)
 	// A lone producer with no consumer is not a chain.
-	a.Observe("flowA", 10, "cluster:svc:1", [][]byte{tokA}, nil)
-	a.Observe("flowC", 200, "cluster:svc:3", [][]byte{tokB}, nil)
+	a.Observe("flowA", 10, 8001, "cluster:svc:1", [][]byte{tokA}, nil)
+	a.Observe("flowC", 200, 8003, "cluster:svc:3", [][]byte{tokB}, nil)
 	if got := a.Synthesize(); len(got) != 0 {
 		t.Errorf("a single flow is not a chain, got %d", len(got))
 	}
