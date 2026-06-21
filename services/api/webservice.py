@@ -159,6 +159,13 @@ def getClusters():
     return return_json_response(clusters)
 
 
+@application.route("/templates")
+def getTemplates():
+    with db.connection() as c:
+        templates = c.cluster_templates()
+    return return_json_response(templates)
+
+
 @application.route("/stats")
 def getStats():
     query = request.args

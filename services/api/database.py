@@ -346,6 +346,28 @@ class Connection(psycopg.Connection):
         result.sort(key=lambda x: x["count"], reverse=True)
         return result
 
+    def cluster_templates(self) -> list[dict]:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.template') AS t").fetchone()["t"] is None:
+                return []
+            rows = cursor.execute(
+                """
+                SELECT service, cluster_id, body, version
+                FROM mine.template
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "service": row["service"],
+                "cluster_id": row["cluster_id"],
+                "tag": f"cluster:{row['service']}:{row['cluster_id']}",
+                "slots": (row["body"] or {}).get("slots", []),
+                "version": row["version"],
+            }
+            for row in rows
+        ]
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)
