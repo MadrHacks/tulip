@@ -28,10 +28,10 @@ func loadChainClusters(ctx context.Context, pool *pgxpool.Pool, cs *chainCluster
 	}
 }
 
-// saveChainTemplate upserts a settled chain, bumping its occurrence count when
-// the same chain pattern recurs.
-func saveChainTemplate(ctx context.Context, pool *pgxpool.Pool, sc settledChain) {
-	body, err := json.Marshal(sc.Template)
+// saveChainBody upserts a settled chain's body (pattern plus runnable plan),
+// bumping its occurrence count when the same chain pattern recurs.
+func saveChainBody(ctx context.Context, pool *pgxpool.Pool, signature string, id int64, body chainBody) {
+	encoded, err := json.Marshal(body)
 	if err != nil {
 		log.Println("minecore: marshal chain:", err)
 		return
@@ -41,7 +41,7 @@ func saveChainTemplate(ctx context.Context, pool *pgxpool.Pool, sc settledChain)
 		VALUES ($1, $2, 1, $3)
 		ON CONFLICT (signature) DO UPDATE SET
 			n = mine.chain_template.n + 1, body = excluded.body, updated_at = now()
-	`, sc.Signature, sc.ID, body)
+	`, signature, id, encoded)
 	if err != nil {
 		log.Println("minecore: save chain:", err)
 	}

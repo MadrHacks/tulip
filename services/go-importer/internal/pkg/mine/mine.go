@@ -154,7 +154,8 @@ func (e *Engine) maybeChainSynthesize(ctx context.Context) {
 	}
 	e.lastChainSynthAt = time.Now()
 	for _, sc := range e.chains.Synthesize() {
-		saveChainTemplate(ctx, e.db.Pool(), sc)
+		body := chainBody{Pattern: sc.Template, Plan: e.lowerChain(ctx, sc)}
+		saveChainBody(ctx, e.db.Pool(), sc.Signature, sc.ID, body)
 		for _, member := range sc.Members {
 			id, err := uuid.FromString(member)
 			if err != nil {
