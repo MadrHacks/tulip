@@ -368,6 +368,19 @@ class Connection(psycopg.Connection):
             for row in rows
         ]
 
+    def cluster_template_body(self, service: str, cluster_id: int) -> dict | None:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.template') AS t").fetchone()["t"] is None:
+                return None
+            row = cursor.execute(
+                """
+                SELECT body FROM mine.template
+                WHERE service = %(service)s AND cluster_id = %(cid)s
+                """,
+                {"service": service, "cid": cluster_id},
+            ).fetchone()
+        return row["body"] if row else None
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)

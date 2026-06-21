@@ -32,6 +32,7 @@ from requests import get
 import dateutil.parser
 from ipaddress import ip_network
 from fuzzyhash import fuzzyhash_filter_flows
+from scaffold import render_scaffold
 
 from configurations import (
     services,
@@ -164,6 +165,15 @@ def getTemplates():
     with db.connection() as c:
         templates = c.cluster_templates()
     return return_json_response(templates)
+
+
+@application.route("/template_scaffold/<service>/<int:cluster_id>")
+def getTemplateScaffold(service, cluster_id):
+    with db.connection() as c:
+        body = c.cluster_template_body(service, cluster_id)
+    if body is None:
+        return return_text_response("template not found", status=404)
+    return return_text_response(render_scaffold(body, service=service))
 
 
 @application.route("/stats")

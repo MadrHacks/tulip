@@ -207,6 +207,12 @@ export const tulipApi = createApi({
     getTemplates: builder.query<ClusterTemplate[], void>({
       query: () => "/templates",
     }),
+    getTemplateScaffold: builder.query<string, { service: string; clusterId: number }>({
+      query: ({ service, clusterId }) => ({
+        url: `/template_scaffold/${service}/${clusterId}`,
+        responseHandler: "text",
+      }),
+    }),
     flowTag: builder.mutation<unknown, { id: string; tag: string; apply: boolean }>({
       query: ({ id, tag, apply }) => ({
         url: "/flow_tag",
@@ -242,6 +248,7 @@ export const {
   useGetUnderAttackQuery,
   useGetClustersQuery,
   useGetTemplatesQuery,
+  useLazyGetTemplateScaffoldQuery,
   useFlowTagMutation,
   useFlowsTagBulkMutation,
 } = tulipApi;

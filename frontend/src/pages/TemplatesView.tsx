@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppDispatch } from "../store";
 import { toggleFilterTag } from "../store/filter";
-import { useGetTemplatesQuery } from "../api";
+import { useGetTemplatesQuery, useLazyGetTemplateScaffoldQuery } from "../api";
 import { Tag } from "../components/Tag";
 
 export function TemplatesView() {
@@ -10,6 +10,14 @@ export function TemplatesView() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const [getScaffold] = useLazyGetTemplateScaffoldQuery();
+
+  const copyScaffold = async (service: string, clusterId: number) => {
+    const { data } = await getScaffold({ service, clusterId });
+    if (data) {
+      await navigator.clipboard.writeText(data);
+    }
+  };
 
   const sorted = useMemo(
     () => [...templates].sort((a, b) => {
@@ -45,6 +53,7 @@ export function TemplatesView() {
               <th className="px-3 py-2 text-left text-secondary font-semibold">Cluster</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Slots</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Version</th>
+              <th className="px-3 py-2 text-center text-secondary font-semibold">Scaffold</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Tag</th>
             </tr>
           </thead>
@@ -70,6 +79,14 @@ export function TemplatesView() {
                   </div>
                 </td>
                 <td className="px-3 py-2 text-center font-mono">{template.version}</td>
+                <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => copyScaffold(template.service, template.cluster_id)}
+                    className="px-2 py-1 text-xs font-medium rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/30"
+                  >
+                    Copy
+                  </button>
+                </td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <Tag tag={template.tag} />
                 </td>
