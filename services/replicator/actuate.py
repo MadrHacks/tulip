@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from chain_replay import replay_chain
 from instantiate import fill_slots, instantiate, is_allowed_target
 
 
@@ -122,3 +123,50 @@ class Replicator:
         if sploit not in self.proven:
             raise ValueError(f"{sploit} not NOP-proven; refusing fan-out")
         return {team: self.replicate(template, sploit, service, port, team) for team, _ in targets}
+
+    def replay(self, plan: dict, sploit: str, team: int) -> dict:
+        """Replay a multi-step chain plan against one target, carrying values
+        between steps. Gated exactly like replicate (armed + allowlist, never our
+        own team); flags found in any step response go to the farm. Returns a
+        JSON-safe summary, not raw response bytes."""
+        if not is_allowed_target(team, self.cfg.team_id):
+            raise ValueError(f"refusing to target our own team {team}")
+        steps = plan.get("steps", [])
+        if not steps:
+            raise ValueError("empty chain plan")
+        if not self.armed:
+            return {"ok": False, "armed": False, "flags": []}
+
+        ip = self.cfg.ip_format.format(team)
+        flagids = fetch_flagids(self.cfg.flagids_url, steps[0].get("service", ""), team)
+
+        def send(request: bytes, service: str, port: int) -> bytes:
+            return fire_once(ip, port, request)
+
+        result = replay_chain(plan, send, flagids=flagids)
+        flags: list[str] = []
+        for response in result["responses"]:
+            flags.extend(extract_flags(response, self.cfg.flag_regex))
+        submit_to_farm(self.cfg, flags, sploit, team)
+        return {
+            "ok": result["ok"],
+            "steps_run": result["steps_run"],
+            "error": result["error"],
+            "flags": flags,
+        }
+
+    def nop_proof_chain(self, plan: dict, sploit: str, nop_team: int) -> dict:
+        """Replay a chain at NOP first; a chain that captures a flag here is
+        marked proven and only then becomes eligible for fan-out."""
+        result = self.replay(plan, sploit, nop_team)
+        if result["flags"]:
+            self.proven.add(sploit)
+        return result
+
+    def fanout_chain(self, plan: dict, sploit: str,
+                     targets: list[tuple[int, str]]) -> dict[int, dict]:
+        """Replay a NOP-proven chain at each target. Refuses any chain that has
+        not been proven against NOP."""
+        if sploit not in self.proven:
+            raise ValueError(f"{sploit} not NOP-proven; refusing fan-out")
+        return {team: self.replay(plan, sploit, team) for team, _ in targets}

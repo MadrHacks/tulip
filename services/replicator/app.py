@@ -113,6 +113,61 @@ def fanout():
     return jsonify(results=results)
 
 
+@app.post("/chain_nop_proof")
+def chain_nop_proof():
+    body = request.get_json(force=True) or {}
+    sploit = body.get("sploit", "")
+    try:
+        result = replicator.nop_proof_chain(plan=body["plan"], sploit=sploit, nop_team=cfg.nop_team)
+        decision = Decision(allow=True, require_human=False, reason="chain nop verified")
+        audit.record(
+            capability="offense",
+            action="chain_nop_proof",
+            level=Level.AUTO,
+            decision=decision,
+            subject=sploit,
+        )
+    except ValueError as exc:
+        decision = Decision(allow=False, require_human=False, reason=str(exc))
+        audit.record(
+            capability="offense",
+            action="chain_nop_proof",
+            level=Level.AUTO,
+            decision=decision,
+            subject=sploit,
+        )
+        return jsonify(error=str(exc)), 400
+    return jsonify(result=result)
+
+
+@app.post("/chain_fanout")
+def chain_fanout():
+    body = request.get_json(force=True) or {}
+    sploit = body.get("sploit", "")
+    targets = target_allowlist(cfg.team_id, cfg.team_count, cfg.ip_format, cfg.nop_team)
+    try:
+        results = replicator.fanout_chain(plan=body["plan"], sploit=sploit, targets=targets)
+        decision = Decision(allow=True, require_human=False, reason="chain fanout succeeded")
+        audit.record(
+            capability="offense",
+            action="chain_fanout",
+            level=Level.AUTO,
+            decision=decision,
+            subject=sploit,
+        )
+    except ValueError as exc:
+        decision = Decision(allow=False, require_human=False, reason=str(exc))
+        audit.record(
+            capability="offense",
+            action="chain_fanout",
+            level=Level.AUTO,
+            decision=decision,
+            subject=sploit,
+        )
+        return jsonify(error=str(exc)), 400
+    return jsonify(results=results)
+
+
 @app.get("/audit")
 def get_audit():
     return jsonify(

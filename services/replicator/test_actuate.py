@@ -56,5 +56,40 @@ class TestGates(unittest.TestCase):
         self.assertNotIn("svc:1", r.proven)
 
 
+class TestChainGates(unittest.TestCase):
+    def _plan(self):
+        return {
+            "steps": [
+                {"template": {"segments": [{"const": base64.b64encode(b"PING").decode()}],
+                              "slots": []}, "service": "svc", "port": 9999},
+            ],
+            "links": [],
+        }
+
+    def test_disarmed_does_not_replay(self):
+        # armed=False: returns without touching the network (a bad ip/port would
+        # raise if it tried to connect).
+        r = Replicator(_cfg(), armed=False)
+        result = r.replay(self._plan(), "svc:1>svc:2", team=1)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["flags"], [])
+
+    def test_refuses_own_team_even_when_armed(self):
+        r = Replicator(_cfg(team_id=36), armed=True)
+        with self.assertRaises(ValueError):
+            r.replay(self._plan(), "svc:1>svc:2", team=36)
+
+    def test_fanout_chain_refuses_unproven(self):
+        r = Replicator(_cfg(), armed=False)
+        with self.assertRaises(ValueError):
+            r.fanout_chain(self._plan(), "svc:1>svc:2", [(1, "10.60.1.1")])
+
+    def test_nop_proof_chain_disarmed_does_not_prove(self):
+        r = Replicator(_cfg(), armed=False)
+        result = r.nop_proof_chain(self._plan(), "svc:1>svc:2", nop_team=0)
+        self.assertEqual(result["flags"], [])
+        self.assertNotIn("svc:1>svc:2", r.proven)
+
+
 if __name__ == "__main__":
     unittest.main()
