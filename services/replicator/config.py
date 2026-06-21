@@ -28,4 +28,6 @@ def load_config(config_dir: str | None = None) -> Config:
         flagids_url=game.get("flag_ids_url", "http://10.10.0.1:8081/flagIds"),
         farm_url=os.environ.get("FARM_URL", "http://farm:5000"),
         farm_token=farm.get("api_token") or farm.get("server_password", ""),
+        nop_team=int(game.get("nop_team", 0)),
+        team_count=int(game.get("range_ip_teams", 0)),
     )

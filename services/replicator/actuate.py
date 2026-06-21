@@ -23,6 +23,8 @@ class Config:
     flagids_url: str
     farm_url: str
     farm_token: str
+    nop_team: int = 0
+    team_count: int = 0
 
 
 def extract_flags(data: bytes, flag_regex: str) -> list[str]:
