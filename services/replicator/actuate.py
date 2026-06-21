@@ -91,6 +91,7 @@ class Replicator:
     def __init__(self, cfg: Config, armed: bool = False):
         self.cfg = cfg
         self.armed = armed
+        self.proven: set[str] = set()  # sploits that captured a flag against NOP
 
     def replicate(self, template: dict, sploit: str, service: str, port: int, team: int) -> list[str]:
         if not is_allowed_target(team, self.cfg.team_id):
@@ -103,3 +104,19 @@ class Replicator:
         flags = extract_flags(response, self.cfg.flag_regex)
         submit_to_farm(self.cfg, flags, sploit, team)
         return flags
+
+    def nop_proof(self, template: dict, sploit: str, service: str, port: int, nop_team: int) -> list[str]:
+        """Fire at NOP first; a sploit that captures a flag here is marked proven
+        and only then becomes eligible for fan-out."""
+        flags = self.replicate(template, sploit, service, port, nop_team)
+        if flags:
+            self.proven.add(sploit)
+        return flags
+
+    def fanout(self, template: dict, sploit: str, service: str, port: int,
+               targets: list[tuple[int, str]]) -> dict[int, list[str]]:
+        """Fire a NOP-proven sploit at each target. Refuses any sploit that has
+        not been proven against NOP."""
+        if sploit not in self.proven:
+            raise ValueError(f"{sploit} not NOP-proven; refusing fan-out")
+        return {team: self.replicate(template, sploit, service, port, team) for team, _ in targets}

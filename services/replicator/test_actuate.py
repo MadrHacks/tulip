@@ -43,6 +43,18 @@ class TestGates(unittest.TestCase):
         with self.assertRaises(ValueError):
             r.replicate(self._template(), "svc:1", "svc", 9999, team=36)
 
+    def test_fanout_refuses_unproven_sploit(self):
+        r = Replicator(_cfg(), armed=False)
+        with self.assertRaises(ValueError):
+            r.fanout(self._template(), "svc:1", "svc", 9999, [(1, "10.60.1.1")])
+
+    def test_nop_proof_disarmed_does_not_prove(self):
+        # disarmed nop_proof captures nothing, so the sploit stays unproven and
+        # fan-out is still refused.
+        r = Replicator(_cfg(), armed=False)
+        self.assertEqual(r.nop_proof(self._template(), "svc:1", "svc", 9999, nop_team=0), [])
+        self.assertNotIn("svc:1", r.proven)
+
 
 if __name__ == "__main__":
     unittest.main()
