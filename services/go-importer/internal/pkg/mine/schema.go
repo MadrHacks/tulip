@@ -15,6 +15,15 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			name text PRIMARY KEY,
 			last_id uuid NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS mine.cluster (
+			service text NOT NULL,
+			id bigint NOT NULL,
+			rep bytea NOT NULL,
+			core bytea NOT NULL,
+			core_set boolean NOT NULL,
+			n integer NOT NULL,
+			PRIMARY KEY (service, id)
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

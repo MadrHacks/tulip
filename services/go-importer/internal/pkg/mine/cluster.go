@@ -118,3 +118,37 @@ func medoid(sigs []MinHash) MinHash {
 	}
 	return sigs[bestIdx]
 }
+
+// clusterSnapshot is the durable identity of a cluster (enough to match new
+// flows after a restart). The reservoir sample is not persisted; it re-seeds
+// from rep on restore.
+type clusterSnapshot struct {
+	id      int64
+	rep     MinHash
+	core    MinHash
+	coreSet bool
+	n       int
+}
+
+func (cs *clusterStore) snapshot() []clusterSnapshot {
+	out := make([]clusterSnapshot, 0, len(cs.clusters))
+	for _, c := range cs.clusters {
+		out = append(out, clusterSnapshot{c.id, c.rep, c.core, c.coreSet, c.n})
+	}
+	return out
+}
+
+func restoreClusterStore(snaps []clusterSnapshot) *clusterStore {
+	cs := newClusterStore()
+	for _, s := range snaps {
+		cs.clusters[s.id] = &cluster{
+			id: s.id, rep: s.rep, core: s.core, coreSet: s.coreSet,
+			reservoir: []MinHash{s.rep}, n: s.n,
+		}
+		cs.lsh.add(s.rep, s.id)
+		if s.id > cs.seq {
+			cs.seq = s.id
+		}
+	}
+	return cs
+}

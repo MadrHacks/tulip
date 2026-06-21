@@ -16,7 +16,10 @@ import (
 	"go-importer/internal/pkg/db"
 )
 
-const flagIDRefresh = 30 * time.Second
+const (
+	flagIDRefresh    = 30 * time.Second
+	snapshotInterval = 60 * time.Second
+)
 
 type Engine struct {
 	db  *db.Database
@@ -27,8 +30,9 @@ type Engine struct {
 	flagRe        *regexp.Regexp
 	flagLifetime  int
 
-	flagIDs   []string
-	flagIDsAt time.Time
+	flagIDs        []string
+	flagIDsAt      time.Time
+	lastSnapshotAt time.Time
 }
 
 func New(database *db.Database, cfg Config) *Engine {
@@ -44,6 +48,7 @@ func New(database *db.Database, cfg Config) *Engine {
 
 func (e *Engine) Run(ctx context.Context) {
 	EnsureSchema(ctx, e.db.Pool())
+	e.loadShards(ctx)
 	cursor := e.loadCursor(ctx)
 	log.Printf("minecore: starting at cursor %s (horizon %s)", cursor, e.cfg.Horizon)
 
@@ -68,6 +73,7 @@ func (e *Engine) Run(ctx context.Context) {
 			cursor = flows[len(flows)-1].Id
 			e.saveCursor(ctx, cursor)
 		}
+		e.maybeSnapshot(ctx)
 
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.
@@ -126,4 +132,21 @@ func (e *Engine) refreshFlagIDs() {
 	}
 	e.flagIDs = contents
 	e.flagIDsAt = time.Now()
+}
+
+func (e *Engine) loadShards(ctx context.Context) {
+	for service, snaps := range loadClusterSnapshots(ctx, e.db.Pool()) {
+		e.shards[service] = restoreClusterStore(snaps)
+	}
+	e.lastSnapshotAt = time.Now()
+}
+
+func (e *Engine) maybeSnapshot(ctx context.Context) {
+	if !e.lastSnapshotAt.IsZero() && time.Since(e.lastSnapshotAt) < snapshotInterval {
+		return
+	}
+	for service, store := range e.shards {
+		saveClusterSnapshots(ctx, e.db.Pool(), service, store.snapshot())
+	}
+	e.lastSnapshotAt = time.Now()
 }
