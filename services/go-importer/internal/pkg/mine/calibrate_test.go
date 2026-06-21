@@ -60,4 +60,12 @@ func TestCalibratorLearnsChecker(t *testing.T) {
 	if role, _ := ClassifyRole(cs, m.AsModel()); role != RoleChecker {
 		t.Fatalf("checker flow: want RoleChecker, got %v", role)
 	}
+
+	// Snapshot/restore preserves the learned model across a restart.
+	restored := restoreCalibrator(c.snapshot())
+	rm := restored.Model()
+	if rm.Source != m.Source || rm.Validated != m.Validated ||
+		math.Abs(rm.PeriodSec-m.PeriodSec) > 1e-9 || math.Abs(rm.Confidence-m.Confidence) > 1e-9 {
+		t.Fatalf("restored model %+v != original %+v", rm, m)
+	}
 }

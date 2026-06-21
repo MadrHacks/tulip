@@ -99,6 +99,43 @@ func (c *Calibrator) Observe(o Obs) {
 	s.observe(o)
 }
 
+// sourceSnapshot is a per-source stat row, the durable form of the calibrator so
+// checker discrimination survives a restart instead of cold-starting.
+type sourceSnapshot struct {
+	source   string
+	count    int
+	flagOuts int
+	lastSeen int64
+	hasLast  bool
+	gapSum   float64
+	gapSqSum float64
+	gapCount int
+}
+
+func (c *Calibrator) snapshot() []sourceSnapshot {
+	out := make([]sourceSnapshot, 0, len(c.stats))
+	for src, s := range c.stats {
+		out = append(out, sourceSnapshot{
+			source: src, count: s.count, flagOuts: s.flagOuts,
+			lastSeen: s.lastSeen, hasLast: s.hasLast,
+			gapSum: s.gapSum, gapSqSum: s.gapSqSum, gapCount: s.gapCount,
+		})
+	}
+	return out
+}
+
+func restoreCalibrator(snaps []sourceSnapshot) *Calibrator {
+	c := NewCalibrator()
+	for _, s := range snaps {
+		c.stats[s.source] = &sourceStat{
+			count: s.count, flagOuts: s.flagOuts,
+			lastSeen: s.lastSeen, hasLast: s.hasLast,
+			gapSum: s.gapSum, gapSqSum: s.gapSqSum, gapCount: s.gapCount,
+		}
+	}
+	return c
+}
+
 // Model picks the checker: among candidate sources (enough samples, zero
 // flag-outs, regular cadence) it chooses the one with the most observations.
 func (c *Calibrator) Model() Calibration {

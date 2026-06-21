@@ -217,6 +217,9 @@ func (e *Engine) loadShards(ctx context.Context) {
 	for service, snaps := range loadClusterSnapshots(ctx, e.db.Pool()) {
 		e.shards[service] = restoreClusterStore(snaps)
 	}
+	for service, snaps := range loadCalibratorSnapshots(ctx, e.db.Pool()) {
+		e.calibrators[service] = restoreCalibrator(snaps)
+	}
 	e.lastSnapshotAt = time.Now()
 }
 
@@ -226,6 +229,9 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 	}
 	for service, store := range e.shards {
 		saveClusterSnapshots(ctx, e.db.Pool(), service, store.snapshot())
+	}
+	for service, calib := range e.calibrators {
+		saveCalibratorSnapshots(ctx, e.db.Pool(), service, calib.snapshot())
 	}
 	e.lastSnapshotAt = time.Now()
 }

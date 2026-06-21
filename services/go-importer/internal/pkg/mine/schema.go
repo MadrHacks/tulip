@@ -47,6 +47,18 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			our_sla_ok boolean NOT NULL,
 			updated_at timestamptz NOT NULL DEFAULT now()
 		);
+		CREATE TABLE IF NOT EXISTS mine.calibrator (
+			service text NOT NULL,
+			source text NOT NULL,
+			count integer NOT NULL,
+			flag_outs integer NOT NULL,
+			last_seen bigint NOT NULL,
+			has_last boolean NOT NULL,
+			gap_sum double precision NOT NULL,
+			gap_sq_sum double precision NOT NULL,
+			gap_count integer NOT NULL,
+			PRIMARY KEY (service, source)
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)
