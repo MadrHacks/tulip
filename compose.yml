@@ -130,6 +130,30 @@ services:
     environment:
       TIMESCALE: ${TIMESCALE}
 
+  replicator:
+    build:
+      context: services/replicator
+    image: tulip-replicator:latest
+    restart: unless-stopped
+    depends_on:
+      - timescale
+    volumes:
+      - ${AD_INFRA_CONFIG_DIR:-./data/config}:/config:ro
+    environment:
+      REPLICATOR_ARMED: "false"
+      FARM_URL: ${FARM_URL:-http://farm:5000}
+      AD_INFRA_CONFIG_DIR: /config
+
+  patch-engine:
+    build:
+      context: services/patch-engine
+    image: tulip-patch-engine:latest
+    restart: unless-stopped
+    environment:
+      PATCH_ENGINE_ARMED: "false"
+      FIREGEX_URL: ${FIREGEX_URL:-http://localhost:4444}
+      FIREGEX_PASSWORD: ${FIREGEX_PASSWORD:-}
+
   suricata:
     build: services/suricata
     depends_on:
