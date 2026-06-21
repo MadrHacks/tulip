@@ -119,6 +119,17 @@ services:
       TIMESCALE: ${TIMESCALE}
       REDIS_URL: redis://redis:6379
 
+  minecore:
+    build:
+      context: services/go-importer
+      target: minecore
+    image: tulip-minecore:latest
+    restart: unless-stopped
+    depends_on:
+      - timescale
+    environment:
+      TIMESCALE: ${TIMESCALE}
+
   suricata:
     build: services/suricata
     depends_on:

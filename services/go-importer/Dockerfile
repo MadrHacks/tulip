@@ -8,7 +8,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY ./ ./
-RUN go build ./cmd/enricher && go build ./cmd/assembler
+RUN go build ./cmd/enricher && go build ./cmd/assembler && go build ./cmd/minecore
 
 ### ENRICHER
 
@@ -16,6 +16,13 @@ FROM alpine:3.23 AS enricher
 WORKDIR /app
 COPY --from=builder /build/enricher .
 CMD ["./enricher"]
+
+### MINECORE
+
+FROM alpine:3.23 AS minecore
+WORKDIR /app
+COPY --from=builder /build/minecore .
+CMD ["./minecore"]
 
 ### ASSEMBLER
 
