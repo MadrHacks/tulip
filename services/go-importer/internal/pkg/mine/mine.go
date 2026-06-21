@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	flagIDRefresh    = 30 * time.Second
-	snapshotInterval = 60 * time.Second
+	flagIDRefresh     = 30 * time.Second
+	snapshotInterval  = 60 * time.Second
+	propagateInterval = 30 * time.Second
 )
 
 type Engine struct {
@@ -34,8 +35,9 @@ type Engine struct {
 	flagIDsAt      time.Time
 	lastSnapshotAt time.Time
 
-	templatedAt map[string]int
-	lastSynthAt time.Time
+	templatedAt     map[string]int
+	lastSynthAt     time.Time
+	lastPropagateAt time.Time
 }
 
 func New(database *db.Database, cfg Config) *Engine {
@@ -79,6 +81,7 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 		e.maybeSnapshot(ctx)
 		e.maybeSynthesize(ctx)
+		e.maybePropagate(ctx)
 
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.
