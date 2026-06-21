@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+
 	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,4 +19,42 @@ func (db *Database) AppendDerivedItems(flowId uuid.UUID, items []FlowItem) {
 	}
 	db.batcherFlowItem.PushAll(buildItemRows(flowId, items))
 	db.batcherFlowIndex.PushAll(buildIndexRows(flowId, items))
+}
+
+// FlowClientData returns a flow's client->server plaintext for analysis: the
+// decrypted items when present, else the raw reassembled items, concatenated in
+// conversation order. Derived representations are excluded.
+func (db *Database) FlowClientData(flowId uuid.UUID) ([]byte, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT kind, data FROM flow_item
+		WHERE flow_id = $1 AND direction = 'c' AND kind IN ('raw', 'decrypted')
+			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
+			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
+		ORDER BY id
+	`, flowId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var raw, dec []byte
+	for rows.Next() {
+		var kind string
+		var data []byte
+		if err := rows.Scan(&kind, &data); err != nil {
+			return nil, err
+		}
+		if kind == RawKind {
+			raw = append(raw, data...)
+		} else {
+			dec = append(dec, data...)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(dec) > 0 {
+		return dec, nil
+	}
+	return raw, nil
 }
