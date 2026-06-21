@@ -336,6 +336,11 @@ export function Header() {
             Clusters
           </button>
         </Link>
+        <Link to={`/templates?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Templates
+          </button>
+        </Link>
         <button
           className="btn-primary"
           onClick={() => setShowDiffPanel((v) => !v)}

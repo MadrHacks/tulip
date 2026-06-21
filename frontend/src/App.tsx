@@ -9,6 +9,7 @@ import { FlowList } from "./components/FlowList";
 import { FlowView } from "./pages/FlowView";
 import { DiffView } from "./pages/DiffView";
 import { ClustersView } from "./pages/ClustersView";
+import { TemplatesView } from "./pages/TemplatesView";
 import { Corrie } from "./components/Corrie";
 import { ThemeProvider } from "./hooks/useTheme";
 
@@ -41,6 +42,14 @@ function App() {
               element={
                 <Suspense>
                   <ClustersView />
+                </Suspense>
+              }
+            />
+            <Route
+              path="templates"
+              element={
+                <Suspense>
+                  <TemplatesView />
                 </Suspense>
               }
             />
