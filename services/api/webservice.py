@@ -183,6 +183,17 @@ def setStar():
     return "ok!"
 
 
+@application.route("/flow_tag", methods=["POST"])
+def setFlowTag():
+    query = request.get_json()
+    flow_id = uuid.UUID(query.get("id"))
+    tag = str(query.get("tag"))
+    apply = bool(query.get("apply"))
+    with db.connection() as c:
+        c.flow_tag(flow_id, tag, apply)
+    return "ok!"
+
+
 @application.route("/services")
 def getServices():
     return return_json_response(services)
