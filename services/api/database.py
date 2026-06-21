@@ -362,7 +362,7 @@ class Connection(psycopg.Connection):
                 "service": row["service"],
                 "cluster_id": row["cluster_id"],
                 "tag": f"cluster:{row['service']}:{row['cluster_id']}",
-                "slots": (row["body"] or {}).get("slots", []),
+                "slots": [s.get("type") for s in ((row["body"] or {}).get("slots") or [])],
                 "version": row["version"],
             }
             for row in rows

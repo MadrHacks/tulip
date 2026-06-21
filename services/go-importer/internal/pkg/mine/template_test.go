@@ -73,8 +73,8 @@ func TestSynthesize(t *testing.T) {
 	if len(tpl.Slots) != 1 {
 		t.Fatalf("expected 1 slot, got %d", len(tpl.Slots))
 	}
-	if tpl.Slots[0] != SlotUnknown {
-		t.Errorf("slot = %v, want unknown (small ints)", tpl.Slots[0])
+	if tpl.Slots[0].Type != SlotUnknown {
+		t.Errorf("slot = %v, want unknown (small ints)", tpl.Slots[0].Type)
 	}
 }
 

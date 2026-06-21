@@ -3,6 +3,7 @@ package mine
 import (
 	"bytes"
 	"regexp"
+	"unicode/utf8"
 )
 
 // SlotType classifies a variable slot of a template by what its values are
@@ -102,11 +103,45 @@ func classifySlot(values [][]byte, flagRe *regexp.Regexp, flagIDs map[string]boo
 	}
 }
 
+// classifySlotInfo characterizes a slot for the replicator: its type plus the
+// charclass, length range, and a sample value (omitted for flag/flagId, which
+// are loot or re-fetched).
+func classifySlotInfo(values [][]byte, flagRe *regexp.Regexp, flagIDs map[string]bool) Slot {
+	slot := Slot{Type: classifySlot(values, flagRe, flagIDs)}
+	if len(values) == 0 {
+		return slot
+	}
+	slot.MinLen, slot.MaxLen = len(values[0]), len(values[0])
+	for _, v := range values {
+		if len(v) < slot.MinLen {
+			slot.MinLen = len(v)
+		}
+		if len(v) > slot.MaxLen {
+			slot.MaxLen = len(v)
+		}
+	}
+	slot.Charclass = DetectCharclass(bytes.TrimSpace(values[0])).String()
+	if slot.Type != SlotFlag && slot.Type != SlotFlagID && utf8.Valid(values[0]) {
+		slot.Example = string(values[0])
+	}
+	return slot
+}
+
 // Template is a synthesized, typed request template for a cluster: the aligned
 // segments plus a type for each variable slot, in order.
 type Template struct {
-	Segments []Segment  `json:"segments"`
-	Slots    []SlotType `json:"slots"`
+	Segments []Segment `json:"segments"`
+	Slots    []Slot    `json:"slots"`
+}
+
+// Slot is a typed, characterized variable slot: enough for the replicator to
+// regenerate or re-fetch its value.
+type Slot struct {
+	Type      SlotType `json:"type"`
+	Charclass string   `json:"charclass,omitempty"`
+	MinLen    int      `json:"min_len,omitempty"`
+	MaxLen    int      `json:"max_len,omitempty"`
+	Example   string   `json:"example,omitempty"`
 }
 
 func countVarSegments(segs []Segment) int {
@@ -139,9 +174,9 @@ func synthesize(members [][]byte, flagRe *regexp.Regexp, flagIDs map[string]bool
 		}
 	}
 
-	slots := make([]SlotType, nSlots)
+	slots := make([]Slot, nSlots)
 	for i := range slots {
-		slots[i] = classifySlot(perSlot[i], flagRe, flagIDs)
+		slots[i] = classifySlotInfo(perSlot[i], flagRe, flagIDs)
 	}
 	return &Template{Segments: segs, Slots: slots}
 }
