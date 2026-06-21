@@ -119,3 +119,13 @@ export interface ClusterTemplate {
   slots: string[];
   version: number;
 }
+
+export interface Chain {
+  id: number;
+  tag: string;
+  signature: string;
+  count: number;
+  steps: string[];
+  links: number;
+  runnable: boolean;
+}

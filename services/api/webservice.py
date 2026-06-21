@@ -176,6 +176,22 @@ def getTemplateScaffold(service, cluster_id):
     return return_text_response(render_scaffold(body, service=service))
 
 
+@application.route("/chains")
+def getChains():
+    with db.connection() as c:
+        chains = c.chain_summaries()
+    return return_json_response(chains)
+
+
+@application.route("/chain/<int:chain_id>")
+def getChainBody(chain_id):
+    with db.connection() as c:
+        body = c.chain_body(chain_id)
+    if body is None:
+        return return_json_response({"error": "chain not found"}, status=404)
+    return return_json_response(body)
+
+
 @application.route("/stats")
 def getStats():
     query = request.args

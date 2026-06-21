@@ -381,6 +381,44 @@ class Connection(psycopg.Connection):
             ).fetchone()
         return row["body"] if row else None
 
+    def chain_summaries(self) -> list[dict]:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.chain_template') AS t").fetchone()["t"] is None:
+                return []
+            rows = cursor.execute(
+                """
+                SELECT signature, id, n, body, updated_at
+                FROM mine.chain_template
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        result = []
+        for row in rows:
+            body = row["body"] or {}
+            pattern = body.get("pattern") or {}
+            result.append(
+                {
+                    "id": row["id"],
+                    "tag": f"chain:{row['id']}",
+                    "signature": row["signature"],
+                    "count": row["n"],
+                    "steps": [s.get("cluster_id") for s in (pattern.get("steps") or [])],
+                    "links": len(pattern.get("links") or []),
+                    "runnable": body.get("plan") is not None,
+                }
+            )
+        return result
+
+    def chain_body(self, chain_id: int) -> dict | None:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.chain_template') AS t").fetchone()["t"] is None:
+                return None
+            row = cursor.execute(
+                "SELECT body FROM mine.chain_template WHERE id = %(id)s",
+                {"id": chain_id},
+            ).fetchone()
+        return row["body"] if row else None
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)

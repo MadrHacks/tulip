@@ -13,6 +13,7 @@ import {
   TicksAttackQuery,
   Cluster,
   ClusterTemplate,
+  Chain,
 } from "./types";
 
 function base64DecodeUnicode(str: string) : string {
@@ -213,6 +214,12 @@ export const tulipApi = createApi({
         responseHandler: "text",
       }),
     }),
+    getChains: builder.query<Chain[], void>({
+      query: () => "/chains",
+    }),
+    getChainBody: builder.query<unknown, number>({
+      query: (chainId) => `/chain/${chainId}`,
+    }),
     flowTag: builder.mutation<unknown, { id: string; tag: string; apply: boolean }>({
       query: ({ id, tag, apply }) => ({
         url: "/flow_tag",
@@ -249,6 +256,8 @@ export const {
   useGetClustersQuery,
   useGetTemplatesQuery,
   useLazyGetTemplateScaffoldQuery,
+  useGetChainsQuery,
+  useGetChainBodyQuery,
   useFlowTagMutation,
   useFlowsTagBulkMutation,
 } = tulipApi;

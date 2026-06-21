@@ -341,6 +341,11 @@ export function Header() {
             Templates
           </button>
         </Link>
+        <Link to={`/chains?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Chains
+          </button>
+        </Link>
         <button
           className="btn-primary"
           onClick={() => setShowDiffPanel((v) => !v)}
