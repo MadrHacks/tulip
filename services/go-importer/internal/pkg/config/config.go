@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -101,6 +102,18 @@ func GameTickDurationSec() int   { return getInt(gameFile, "tick_duration_sec", 
 func GameTickLengthMs() int      { return GameTickDurationSec() * 1000 }
 func GameFlagRegex() string      { return getString(gameFile, "flag_regex", "[A-Z0-9]{31}=") }
 func GameFlagLifetimeTicks() int { return getInt(gameFile, "flag_lifetime_ticks", 5) }
+func GameserverURL() string      { return getString(gameFile, "gameserver_url", "") }
+func TeamID() int                { return getInt(gameFile, "team_id", -1) }
+
+// ScoreboardBaseURL is the gameserver origin (scheme://host, without the flag
+// submission port or path) where the scoreboard API lives.
+func ScoreboardBaseURL() string {
+	u, err := url.Parse(GameserverURL())
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Hostname()
+}
 
 // Vulnbox config
 

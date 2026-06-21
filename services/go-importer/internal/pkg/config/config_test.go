@@ -23,3 +23,17 @@ func TestServiceByPort(t *testing.T) {
 		}
 	}
 }
+
+func TestScoreboardBaseURLAndTeamID(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "game.yml")
+	os.WriteFile(p, []byte("gameserver_url: http://10.10.0.1:8080/flags\nteam_id: 36\n"), 0o644)
+	gameFile = &fileCache{path: p}
+
+	if got := ScoreboardBaseURL(); got != "http://10.10.0.1" {
+		t.Errorf("ScoreboardBaseURL = %q, want http://10.10.0.1", got)
+	}
+	if got := TeamID(); got != 36 {
+		t.Errorf("TeamID = %d, want 36", got)
+	}
+}
