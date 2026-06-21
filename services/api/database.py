@@ -285,6 +285,23 @@ class Connection(psycopg.Connection):
 
         self.execute(sql_query, {"flow_id": flow_id, "tag": tag})
 
+    def flow_tag_ids(self, ids: list[uuid.UUID], tag: str, apply: bool) -> None:
+        if not ids:
+            return
+        if apply:
+            sql_query = """
+                UPDATE flow
+                SET tags = jsonb_unique(tags || jsonb_build_array(%(tag)s::text))
+                WHERE id = ANY(%(ids)s)
+            """
+        else:
+            sql_query = """
+                UPDATE flow
+                SET tags = tags - %(tag)s::text
+                WHERE id = ANY(%(ids)s)
+            """
+        self.execute(sql_query, {"ids": ids, "tag": tag})
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)

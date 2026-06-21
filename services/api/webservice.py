@@ -85,40 +85,27 @@ def getTickInfo():
     return return_json_response(data)
 
 
-@application.route("/query", methods=["POST"])
-def query():
-    query = request.get_json()
-
-    try:
-        db_query = database.FlowQuery(
-            regex_insensitive=(
-                re.compile(query["regex_insensitive"])
-                if "regex_insensitive" in query
-                else None
-            ),
-            ip_src=ip_network(query["ip_src"]) if "ip_src" in query else None,
-            ip_dst=ip_network(query["ip_dst"]) if "ip_dst" in query else None,
-            port_src=query.get("port_src"),
-            port_dst=query.get("port_dst"),
-            time_from=(
-                dateutil.parser.parse(query["time_from"])
-                if "time_from" in query
-                else None
-            ),
-            time_to=(
-                dateutil.parser.parse(query["time_to"]) if "time_to" in query else None
-            ),
-            tags_include=[str(elem) for elem in query.get("tags_include", [])],
-            tags_exclude=[str(elem) for elem in query.get("tags_exclude", [])],
-            tag_intersection_and=query.get("tag_intersection_mode", "").lower() == "and",
-        )
-    except re.error as error:
-        return return_json_response(
-            {
-                "error": str(error),
-            },
-            status=400,
-        )
+def _resolve_flows(query):
+    db_query = database.FlowQuery(
+        regex_insensitive=(
+            re.compile(query["regex_insensitive"])
+            if "regex_insensitive" in query
+            else None
+        ),
+        ip_src=ip_network(query["ip_src"]) if "ip_src" in query else None,
+        ip_dst=ip_network(query["ip_dst"]) if "ip_dst" in query else None,
+        port_src=query.get("port_src"),
+        port_dst=query.get("port_dst"),
+        time_from=(
+            dateutil.parser.parse(query["time_from"]) if "time_from" in query else None
+        ),
+        time_to=(
+            dateutil.parser.parse(query["time_to"]) if "time_to" in query else None
+        ),
+        tags_include=[str(elem) for elem in query.get("tags_include", [])],
+        tags_exclude=[str(elem) for elem in query.get("tags_exclude", [])],
+        tag_intersection_and=query.get("tag_intersection_mode", "").lower() == "and",
+    )
 
     with db.connection() as c:
         flows = c.flow_query(db_query)
@@ -132,7 +119,31 @@ def query():
             exclude_set=query.get("fuzzyhash_exclude", []),
         )
 
+    return flows
+
+
+@application.route("/query", methods=["POST"])
+def query():
+    try:
+        flows = _resolve_flows(request.get_json())
+    except re.error as error:
+        return return_json_response({"error": str(error)}, status=400)
     return return_json_response(flows)
+
+
+@application.route("/flows_tag_bulk", methods=["POST"])
+def setFlowsTagBulk():
+    body = request.get_json()
+    tag = str(body.get("tag"))
+    apply = bool(body.get("apply", True))
+    try:
+        flows = _resolve_flows(body.get("query", {}))
+    except re.error as error:
+        return return_json_response({"error": str(error)}, status=400)
+    ids = [flow["id"] for flow in flows]
+    with db.connection() as c:
+        c.flow_tag_ids(ids, tag, apply)
+    return return_json_response({"count": len(ids)})
 
 
 @application.route("/stats")
