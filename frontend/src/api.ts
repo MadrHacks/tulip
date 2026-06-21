@@ -14,6 +14,7 @@ import {
   Cluster,
   ClusterTemplate,
   Chain,
+  ChainBody,
   Heat,
 } from "./types";
 
@@ -221,7 +222,7 @@ export const tulipApi = createApi({
     getHeat: builder.query<Record<string, Heat>, void>({
       query: () => "/heat",
     }),
-    getChainBody: builder.query<unknown, number>({
+    getChainBody: builder.query<ChainBody, number>({
       query: (chainId) => `/chain/${chainId}`,
     }),
     flowTag: builder.mutation<unknown, { id: string; tag: string; apply: boolean }>({

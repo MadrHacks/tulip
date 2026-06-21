@@ -136,3 +136,29 @@ export interface Heat {
   total_stolen: number;
   our_sla_ok: boolean;
 }
+
+export interface ChainPlanStep {
+  service: string;
+  port: number;
+  template: { slots?: { type: string }[] };
+}
+
+export interface ChainPlanLink {
+  producer_step: number;
+  consumer_step: number;
+  extract: string;
+  inject_slot: number;
+}
+
+export interface ChainPlan {
+  steps: ChainPlanStep[];
+  links: ChainPlanLink[];
+}
+
+export interface ChainBody {
+  pattern: {
+    steps: { cluster_id: string }[];
+    links: { producer_step: number; consumer_step: number }[];
+  };
+  plan: ChainPlan | null;
+}
