@@ -302,6 +302,50 @@ class Connection(psycopg.Connection):
             """
         self.execute(sql_query, {"ids": ids, "tag": tag})
 
+    def cluster_summaries(self, since_seconds: int | None = None) -> list[dict]:
+        parameters: dict[str, Any] = {}
+        where_clause = "WHERE t.tag LIKE 'cluster:%'"
+        if since_seconds is not None:
+            parameters["since"] = since_seconds
+            where_clause += (
+                " AND f.id > fid_pack_low(now() - make_interval(secs => %(since)s))"
+            )
+
+        sql_query = f"""
+            SELECT t.tag,
+                   count(*) AS count,
+                   count(*) FILTER (WHERE f.tags ? 'flag-out') AS flag_out,
+                   count(*) FILTER (WHERE f.tags ? 'flag-in') AS flag_in
+            FROM flow f, jsonb_array_elements_text(f.tags) AS t(tag)
+            {where_clause}
+            GROUP BY t.tag
+        """
+
+        with self.cursor(row_factory=dict_row) as cursor:
+            rows = cursor.execute(sql_query, parameters).fetchall()
+
+        result = []
+        for row in rows:
+            parts = row["tag"].split(":")
+            if len(parts) != 3 or parts[0] != "cluster":
+                continue
+            try:
+                cluster_id = int(parts[2])
+            except ValueError:
+                continue
+            result.append(
+                {
+                    "tag": row["tag"],
+                    "service": parts[1],
+                    "id": cluster_id,
+                    "count": row["count"],
+                    "flag_out": row["flag_out"],
+                    "flag_in": row["flag_in"],
+                }
+            )
+        result.sort(key=lambda x: x["count"], reverse=True)
+        return result
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)

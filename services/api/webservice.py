@@ -146,6 +146,19 @@ def setFlowsTagBulk():
     return return_json_response({"count": len(ids)})
 
 
+@application.route("/clusters")
+def getClusters():
+    since_seconds = None
+    if "since" in request.args:
+        try:
+            since_seconds = int(request.args["since"])
+        except ValueError:
+            return return_json_response({"error": "invalid 'since'"}, status=400)
+    with db.connection() as c:
+        clusters = c.cluster_summaries(since_seconds)
+    return return_json_response(clusters)
+
+
 @application.route("/stats")
 def getStats():
     query = request.args
