@@ -59,6 +59,45 @@ func (db *Database) FlowClientData(flowId uuid.UUID) ([]byte, error) {
 	return raw, nil
 }
 
+// FlowServerData returns a flow's server->client plaintext for analysis: the
+// decrypted items when present, else the raw reassembled items, concatenated in
+// conversation order. These are the values a service hands out (tokens, ids),
+// the producer side of cross-flow dataflow. Derived representations are excluded.
+func (db *Database) FlowServerData(flowId uuid.UUID) ([]byte, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT kind, data FROM flow_item
+		WHERE flow_id = $1 AND direction = 's' AND kind IN ('raw', 'decrypted')
+			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
+			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
+		ORDER BY id
+	`, flowId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var raw, dec []byte
+	for rows.Next() {
+		var kind string
+		var data []byte
+		if err := rows.Scan(&kind, &data); err != nil {
+			return nil, err
+		}
+		if kind == RawKind {
+			raw = append(raw, data...)
+		} else {
+			dec = append(dec, data...)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(dec) > 0 {
+		return dec, nil
+	}
+	return raw, nil
+}
+
 // ClusterMemberData returns the client plaintext of up to limit recent flows
 // carrying the given tag (e.g. "cluster:CCalendar:7"), within the horizon.
 func (db *Database) ClusterMemberData(tag string, horizonSecs float64, limit int) ([][]byte, error) {
