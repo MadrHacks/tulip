@@ -22,3 +22,12 @@ func (cs *chainClusterStore) Assign(signature string) (int64, bool) {
 	cs.ids[signature] = cs.seq
 	return cs.seq, true
 }
+
+// restore re-seeds a persisted signature->id mapping and advances the id
+// sequence so freshly assigned ids stay unique across restarts.
+func (cs *chainClusterStore) restore(signature string, id int64) {
+	cs.ids[signature] = id
+	if id > cs.seq {
+		cs.seq = id
+	}
+}

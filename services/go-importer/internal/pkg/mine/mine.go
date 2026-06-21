@@ -14,12 +14,15 @@ import (
 
 	"go-importer/internal/pkg/config"
 	"go-importer/internal/pkg/db"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 const (
-	flagIDRefresh     = 30 * time.Second
-	snapshotInterval  = 60 * time.Second
-	propagateInterval = 30 * time.Second
+	flagIDRefresh      = 30 * time.Second
+	snapshotInterval   = 60 * time.Second
+	propagateInterval  = 30 * time.Second
+	chainSynthInterval = 60 * time.Second
 )
 
 type Engine struct {
@@ -39,6 +42,9 @@ type Engine struct {
 	templatedAt     map[string]int
 	lastSynthAt     time.Time
 	lastPropagateAt time.Time
+
+	chains           *chainAnalyzer
+	lastChainSynthAt time.Time
 }
 
 func New(database *db.Database, cfg Config) *Engine {
@@ -51,12 +57,15 @@ func New(database *db.Database, cfg Config) *Engine {
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
 		templatedAt:   map[string]int{},
+		chains: newChainAnalyzer(
+			int64(cfg.ChainWindow.Seconds()), cfg.ChainDFMax, cfg.ChainMaxSize),
 	}
 }
 
 func (e *Engine) Run(ctx context.Context) {
 	EnsureSchema(ctx, e.db.Pool())
 	e.loadShards(ctx)
+	loadChainClusters(ctx, e.db.Pool(), e.chains.clusters)
 	cursor := e.loadCursor(ctx)
 	log.Printf("minecore: starting at cursor %s (horizon %s)", cursor, e.cfg.Horizon)
 
@@ -84,6 +93,7 @@ func (e *Engine) Run(ctx context.Context) {
 		e.maybeSnapshot(ctx)
 		e.maybeSynthesize(ctx)
 		e.maybePropagate(ctx)
+		e.maybeChainSynthesize(ctx)
 
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.
@@ -115,8 +125,44 @@ func (e *Engine) handle(f *Flow) {
 	}
 	id, _ := store.Assign(sig)
 
-	e.db.FlowAddTags(f.Id, []string{fmt.Sprintf("cluster:%s:%d", service, id)})
+	tag := fmt.Sprintf("cluster:%s:%d", service, id)
+	e.db.FlowAddTags(f.Id, []string{tag})
 	e.tagRole(f, service)
+	e.observeChain(f, tag, data)
+}
+
+// observeChain feeds the flow's high-entropy tokens into the chain analyzer:
+// values the service hands out (server->client) as producers, values the client
+// sends as consumers. Cross-flow reuse of a value links the two flows.
+func (e *Engine) observeChain(f *Flow, clusterTag string, clientData []byte) {
+	serverData, err := e.db.FlowServerData(f.Id)
+	if err != nil {
+		log.Println("minecore: server data:", err)
+		return
+	}
+	e.chains.Observe(
+		f.Id.String(), f.Time.Unix(), clusterTag,
+		ExtractTokens(serverData), ExtractTokens(clientData),
+	)
+}
+
+// maybeChainSynthesize emits settled multi-step sessions: it persists each chain
+// template and tags its member flows with the chain id.
+func (e *Engine) maybeChainSynthesize(ctx context.Context) {
+	if !e.lastChainSynthAt.IsZero() && time.Since(e.lastChainSynthAt) < chainSynthInterval {
+		return
+	}
+	e.lastChainSynthAt = time.Now()
+	for _, sc := range e.chains.Synthesize() {
+		saveChainTemplate(ctx, e.db.Pool(), sc)
+		for _, member := range sc.Members {
+			id, err := uuid.FromString(member)
+			if err != nil {
+				continue
+			}
+			e.db.FlowAddTags(id, []string{fmt.Sprintf("chain:%d", sc.ID)})
+		}
+	}
 }
 
 func (e *Engine) serviceName(port int) string {

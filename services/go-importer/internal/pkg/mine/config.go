@@ -14,6 +14,13 @@ type Config struct {
 	Horizon      time.Duration
 	PollBatch    int
 	PollInterval time.Duration
+
+	// ChainWindow bounds cross-flow value reuse: a value minted in one flow can
+	// link to a later flow only within this window. ChainDFMax drops values seen
+	// in too many flows (framework constants); ChainMaxSize caps a session.
+	ChainWindow  time.Duration
+	ChainDFMax   int
+	ChainMaxSize int
 }
 
 func ConfigFromEnv() Config {
@@ -21,6 +28,9 @@ func ConfigFromEnv() Config {
 		Horizon:      envDuration("MINECORE_HORIZON", 20*time.Minute),
 		PollBatch:    envInt("MINECORE_POLL_BATCH", 512),
 		PollInterval: envDuration("MINECORE_POLL_INTERVAL", time.Second),
+		ChainWindow:  envDuration("MINECORE_CHAIN_WINDOW", 2*time.Minute),
+		ChainDFMax:   envInt("MINECORE_CHAIN_DF_MAX", 8),
+		ChainMaxSize: envInt("MINECORE_CHAIN_MAX_SIZE", 16),
 	}
 }
 

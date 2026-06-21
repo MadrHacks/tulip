@@ -32,6 +32,13 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			updated_at timestamptz NOT NULL DEFAULT now(),
 			PRIMARY KEY (service, cluster_id)
 		);
+		CREATE TABLE IF NOT EXISTS mine.chain_template (
+			signature text PRIMARY KEY,
+			id bigint NOT NULL,
+			n integer NOT NULL,
+			body jsonb NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now()
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

@@ -1,5 +1,7 @@
 package mine
 
+import "math"
+
 // Edge is a cross-flow value-dataflow link: a high-entropy value first produced
 // in flow Src (a server response) and later reused in a different flow Dst (a
 // client request). Vhash identifies the value.
@@ -85,6 +87,24 @@ func (g *VDG) Observe(flow string, tSec int64, produced bool, value []byte) []Ed
 	st.flowDF[flow]++
 
 	return edges
+}
+
+// Sweep drops value states with no occurrence newer than tSec-window, bounding
+// memory to values seen within the recent window. The per-value evict keeps an
+// individual state lean; this removes states that have gone entirely quiet.
+func (g *VDG) Sweep(tSec int64) {
+	cutoff := tSec - g.window
+	for h, st := range g.states {
+		newest := int64(math.MinInt64)
+		for _, o := range st.occs {
+			if o.t > newest {
+				newest = o.t
+			}
+		}
+		if newest < cutoff {
+			delete(g.states, h)
+		}
+	}
 }
 
 // evict drops occurrences older than tSec-window and keeps the distinct-flow set
