@@ -43,7 +43,11 @@ type Engine struct {
 	lastSynthAt     time.Time
 	lastPropagateAt time.Time
 
-	chains           *chainAnalyzer
+	chains           map[string]*chainAnalyzer // per service
+	chainClusters    *chainClusterStore        // shared id allocator
+	chainWindow      int64
+	chainDFMax       int
+	chainMaxSize     int
 	lastChainSynthAt time.Time
 
 	scoreboardURL string
@@ -62,8 +66,11 @@ func New(database *db.Database, cfg Config) *Engine {
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
 		templatedAt:   map[string]int{},
-		chains: newChainAnalyzer(
-			int64(cfg.ChainWindow.Seconds()), cfg.ChainDFMax, cfg.ChainMaxSize),
+		chains:        map[string]*chainAnalyzer{},
+		chainClusters: newChainClusterStore(),
+		chainWindow:   int64(cfg.ChainWindow.Seconds()),
+		chainDFMax:    cfg.ChainDFMax,
+		chainMaxSize:  cfg.ChainMaxSize,
 		scoreboardURL: config.ScoreboardBaseURL(),
 		teamID:        config.TeamID(),
 		gameStart:     parseGameStart(config.GameStart()),
@@ -85,7 +92,7 @@ func parseGameStart(s string) time.Time {
 func (e *Engine) Run(ctx context.Context) {
 	EnsureSchema(ctx, e.db.Pool())
 	e.loadShards(ctx)
-	loadChainClusters(ctx, e.db.Pool(), e.chains.clusters)
+	loadChainClusters(ctx, e.db.Pool(), e.chainClusters)
 	go e.pollHeatLoop(ctx)
 	cursor := e.loadCursor(ctx)
 	log.Printf("minecore: starting at cursor %s (horizon %s)", cursor, e.cfg.Horizon)
@@ -149,40 +156,54 @@ func (e *Engine) handle(f *Flow) {
 	tag := fmt.Sprintf("cluster:%s:%d", service, id)
 	e.db.FlowAddTags(f.Id, []string{tag})
 	e.tagRole(f, service)
-	e.observeChain(f, tag, data)
+	e.observeChain(f, service, tag, data)
 }
 
-// observeChain feeds the flow's high-entropy tokens into the chain analyzer:
-// values the service hands out (server->client) as producers, values the client
-// sends as consumers. Cross-flow reuse of a value links the two flows.
-func (e *Engine) observeChain(f *Flow, clusterTag string, clientData []byte) {
+// chainShard returns the per-service chain analyzer, creating it on first use.
+// Sharding by service keeps the value graph and sessions within one service, so
+// a value coincidentally shared across services never links them into a chain.
+func (e *Engine) chainShard(service string) *chainAnalyzer {
+	a := e.chains[service]
+	if a == nil {
+		a = newChainAnalyzer(e.chainWindow, e.chainDFMax, e.chainMaxSize, e.chainClusters)
+		e.chains[service] = a
+	}
+	return a
+}
+
+// observeChain feeds the flow's high-entropy tokens into its service's chain
+// analyzer: values the service hands out (server->client) as producers, values
+// the client sends as consumers. Cross-flow reuse of a value links the two flows.
+func (e *Engine) observeChain(f *Flow, service, clusterTag string, clientData []byte) {
 	serverData, err := e.db.FlowServerData(f.Id)
 	if err != nil {
 		log.Println("minecore: server data:", err)
 		return
 	}
-	e.chains.Observe(
+	e.chainShard(service).Observe(
 		f.Id.String(), f.Time.Unix(), f.DstPort, clusterTag,
 		ExtractTokens(serverData), ExtractTokens(clientData),
 	)
 }
 
-// maybeChainSynthesize emits settled multi-step sessions: it persists each chain
-// template and tags its member flows with the chain id.
+// maybeChainSynthesize emits settled multi-step sessions across every service
+// shard: it persists each chain template and tags its member flows.
 func (e *Engine) maybeChainSynthesize(ctx context.Context) {
 	if !e.lastChainSynthAt.IsZero() && time.Since(e.lastChainSynthAt) < chainSynthInterval {
 		return
 	}
 	e.lastChainSynthAt = time.Now()
-	for _, sc := range e.chains.Synthesize() {
-		body := chainBody{Pattern: sc.Template, Plan: e.lowerChain(ctx, sc)}
-		saveChainBody(ctx, e.db.Pool(), sc.Signature, sc.ID, body)
-		for _, member := range sc.Members {
-			id, err := uuid.FromString(member)
-			if err != nil {
-				continue
+	for _, shard := range e.chains {
+		for _, sc := range shard.Synthesize() {
+			body := chainBody{Pattern: sc.Template, Plan: e.lowerChain(ctx, sc)}
+			saveChainBody(ctx, e.db.Pool(), sc.Signature, sc.ID, body)
+			for _, member := range sc.Members {
+				id, err := uuid.FromString(member)
+				if err != nil {
+					continue
+				}
+				e.db.FlowAddTags(id, []string{fmt.Sprintf("chain:%d", sc.ID)})
 			}
-			e.db.FlowAddTags(id, []string{fmt.Sprintf("chain:%d", sc.ID)})
 		}
 	}
 }

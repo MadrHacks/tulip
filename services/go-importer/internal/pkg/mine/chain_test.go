@@ -6,7 +6,7 @@ import (
 )
 
 func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
-	a := newChainAnalyzer(100, 8, 16)
+	a := newChainAnalyzer(100, 8, 16, newChainClusterStore())
 
 	// flowA mints tokA; flowB reuses it -> a producer->consumer edge.
 	a.Observe("flowA", 10, 8001, "cluster:svc:1", [][]byte{tokA}, nil)
@@ -55,7 +55,7 @@ func TestChainAnalyzerEmitsSettledChain(t *testing.T) {
 }
 
 func TestChainAnalyzerIgnoresTokenlessFlows(t *testing.T) {
-	a := newChainAnalyzer(100, 8, 16)
+	a := newChainAnalyzer(100, 8, 16, newChainClusterStore())
 	a.Observe("flowA", 10, 8001, "cluster:svc:1", nil, nil)
 	if len(a.flowMeta) != 0 {
 		t.Errorf("token-less flow should not be recorded, have %d", len(a.flowMeta))
@@ -66,7 +66,7 @@ func TestChainAnalyzerIgnoresTokenlessFlows(t *testing.T) {
 }
 
 func TestChainAnalyzerSingleFlowNoChain(t *testing.T) {
-	a := newChainAnalyzer(100, 8, 16)
+	a := newChainAnalyzer(100, 8, 16, newChainClusterStore())
 	// A lone producer with no consumer is not a chain.
 	a.Observe("flowA", 10, 8001, "cluster:svc:1", [][]byte{tokA}, nil)
 	a.Observe("flowC", 200, 8003, "cluster:svc:3", [][]byte{tokB}, nil)

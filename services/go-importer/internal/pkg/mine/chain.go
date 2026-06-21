@@ -44,10 +44,13 @@ type chainAnalyzer struct {
 	maxT     int64
 }
 
-func newChainAnalyzer(windowSec int64, dfMax, maxSize int) *chainAnalyzer {
+// newChainAnalyzer builds a per-service shard. The clusterStore is shared across
+// shards so chain ids stay globally unique while each service's value graph and
+// sessions stay isolated (attacks never span services).
+func newChainAnalyzer(windowSec int64, dfMax, maxSize int, clusters *chainClusterStore) *chainAnalyzer {
 	return &chainAnalyzer{
 		vdg:      NewVDG(windowSec, dfMax),
-		clusters: newChainClusterStore(),
+		clusters: clusters,
 		window:   windowSec,
 		maxSize:  maxSize,
 		flowMeta: map[string]SessionFlow{},
