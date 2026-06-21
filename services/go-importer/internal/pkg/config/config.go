@@ -19,10 +19,10 @@ func init() {
 }
 
 type fileCache struct {
-	mu     sync.Mutex
-	path   string
-	mtime  time.Time
-	data   map[string]interface{}
+	mu    sync.Mutex
+	path  string
+	mtime time.Time
+	data  map[string]interface{}
 }
 
 func (fc *fileCache) load() map[string]interface{} {
@@ -54,8 +54,9 @@ func (fc *fileCache) load() map[string]interface{} {
 }
 
 var (
-	gameFile    = &fileCache{path: filepath.Join(configDir, "game.yml")}
-	vulnboxFile = &fileCache{path: filepath.Join(configDir, "vulnbox.yml")}
+	gameFile     = &fileCache{path: filepath.Join(configDir, "game.yml")}
+	vulnboxFile  = &fileCache{path: filepath.Join(configDir, "vulnbox.yml")}
+	servicesFile = &fileCache{path: filepath.Join(configDir, "services.yml")}
 )
 
 func getString(fc *fileCache, key string, fallback string) string {
@@ -95,12 +96,39 @@ func getInt(fc *fileCache, key string, fallback int) int {
 
 // Game config
 
-func GameStart() string       { return getString(gameFile, "start", "") }
-func GameTickDurationSec() int { return getInt(gameFile, "tick_duration_sec", 120) }
-func GameTickLengthMs() int    { return GameTickDurationSec() * 1000 }
-func GameFlagRegex() string    { return getString(gameFile, "flag_regex", "[A-Z0-9]{31}=") }
+func GameStart() string          { return getString(gameFile, "start", "") }
+func GameTickDurationSec() int   { return getInt(gameFile, "tick_duration_sec", 120) }
+func GameTickLengthMs() int      { return GameTickDurationSec() * 1000 }
+func GameFlagRegex() string      { return getString(gameFile, "flag_regex", "[A-Z0-9]{31}=") }
 func GameFlagLifetimeTicks() int { return getInt(gameFile, "flag_lifetime_ticks", 5) }
 
 // Vulnbox config
 
 func VulnboxIP() string { return getString(vulnboxFile, "ip", "") }
+
+// Services config
+
+// ServiceByPort maps each service port to its logical service name, from
+// services.yml (ports grouped under a name), so analysis shards by service: a
+// service's multiple ports collapse to one name.
+func ServiceByPort() map[int]string {
+	out := map[int]string{}
+	list, _ := servicesFile.load()["services"].([]interface{})
+	for _, item := range list {
+		svc, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := svc["name"].(string)
+		ports, _ := svc["ports"].([]interface{})
+		for _, p := range ports {
+			switch n := p.(type) {
+			case int:
+				out[n] = name
+			case float64:
+				out[int(n)] = name
+			}
+		}
+	}
+	return out
+}
