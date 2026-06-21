@@ -102,3 +102,20 @@ export interface TicksAttackQuery {
   from_tick: number;
   to_tick: number;
 }
+
+export interface Cluster {
+  tag: string;
+  service: string;
+  id: number;
+  count: number;
+  flag_out: number;
+  flag_in: number;
+}
+
+export interface ClusterTemplate {
+  service: string;
+  cluster_id: number;
+  tag: string;
+  slots: string[];
+  version: number;
+}

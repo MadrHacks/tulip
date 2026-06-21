@@ -331,6 +331,11 @@ export function Header() {
             Graph
           </button>
         </Link>
+        <Link to={`/clusters?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Clusters
+          </button>
+        </Link>
         <button
           className="btn-primary"
           onClick={() => setShowDiffPanel((v) => !v)}

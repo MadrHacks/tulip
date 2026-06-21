@@ -11,6 +11,8 @@ import {
   Stats,
   TicksAttackInfo,
   TicksAttackQuery,
+  Cluster,
+  ClusterTemplate,
 } from "./types";
 
 function base64DecodeUnicode(str: string) : string {
@@ -196,6 +198,31 @@ export const tulipApi = createApi({
       //   }
       // },
     }),
+    getClusters: builder.query<Cluster[], { since?: number } | void>({
+      query: (arg) => ({
+        url: "/clusters",
+        params: arg && arg.since !== undefined ? { since: arg.since } : {},
+      }),
+    }),
+    getTemplates: builder.query<ClusterTemplate[], void>({
+      query: () => "/templates",
+    }),
+    flowTag: builder.mutation<unknown, { id: string; tag: string; apply: boolean }>({
+      query: ({ id, tag, apply }) => ({
+        url: "/flow_tag",
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: { id, tag, apply },
+      }),
+    }),
+    flowsTagBulk: builder.mutation<{ count: number }, { query: FlowsQuery; tag: string; apply: boolean }>({
+      query: ({ query, tag, apply }) => ({
+        url: "/flows_tag_bulk",
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: { query, tag, apply },
+      }),
+    }),
   }),
 });
 
@@ -213,4 +240,8 @@ export const {
   useStarFlowMutation,
   useGetStatsQuery,
   useGetUnderAttackQuery,
+  useGetClustersQuery,
+  useGetTemplatesQuery,
+  useFlowTagMutation,
+  useFlowsTagBulkMutation,
 } = tulipApi;
