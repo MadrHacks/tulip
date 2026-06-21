@@ -39,6 +39,14 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			body jsonb NOT NULL,
 			updated_at timestamptz NOT NULL DEFAULT now()
 		);
+		CREATE TABLE IF NOT EXISTS mine.heat (
+			service text PRIMARY KEY,
+			our_lost integer NOT NULL,
+			our_stolen integer NOT NULL,
+			total_stolen integer NOT NULL,
+			our_sla_ok boolean NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now()
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

@@ -45,6 +45,11 @@ type Engine struct {
 
 	chains           *chainAnalyzer
 	lastChainSynthAt time.Time
+
+	scoreboardURL string
+	teamID        int
+	gameStart     time.Time
+	gameTick      time.Duration
 }
 
 func New(database *db.Database, cfg Config) *Engine {
@@ -59,13 +64,29 @@ func New(database *db.Database, cfg Config) *Engine {
 		templatedAt:   map[string]int{},
 		chains: newChainAnalyzer(
 			int64(cfg.ChainWindow.Seconds()), cfg.ChainDFMax, cfg.ChainMaxSize),
+		scoreboardURL: config.ScoreboardBaseURL(),
+		teamID:        config.TeamID(),
+		gameStart:     parseGameStart(config.GameStart()),
+		gameTick:      time.Duration(config.GameTickDurationSec()) * time.Second,
 	}
+}
+
+// parseGameStart parses the configured game start time, returning the zero time
+// (which disables the heat poller) when it is unset or unrecognized.
+func parseGameStart(s string) time.Time {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func (e *Engine) Run(ctx context.Context) {
 	EnsureSchema(ctx, e.db.Pool())
 	e.loadShards(ctx)
 	loadChainClusters(ctx, e.db.Pool(), e.chains.clusters)
+	go e.pollHeatLoop(ctx)
 	cursor := e.loadCursor(ctx)
 	log.Printf("minecore: starting at cursor %s (horizon %s)", cursor, e.cfg.Horizon)
 
