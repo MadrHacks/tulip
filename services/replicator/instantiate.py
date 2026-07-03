@@ -112,7 +112,11 @@ def fill_slots(template: dict, *, flagids: list[bytes] | None = None) -> list[by
 
 
 def is_allowed_target(team_index: int, our_team_id: int) -> bool:
-    """Guard: never allow firing at our own team."""
+    """Guard: never fire at our own team. Fails CLOSED — an unknown own team
+    (our_team_id < 0, e.g. a missing/mis-mounted config) refuses EVERY target
+    rather than turning them all into live targets."""
+    if our_team_id < 0:
+        return False
     return team_index != our_team_id
 
 

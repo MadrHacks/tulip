@@ -148,3 +148,18 @@ class TestTargetAllowlist(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOwnTeamFailClosed(unittest.TestCase):
+    def test_unknown_own_team_refuses_all(self):
+        from instantiate import is_allowed_target, target_allowlist
+        self.assertFalse(is_allowed_target(0, -1))
+        self.assertFalse(is_allowed_target(5, -1))
+        # An unknown own team must fire at NOBODY, not everybody.
+        self.assertEqual(target_allowlist(-1, 30, "10.60.{}.1", 0), [])
+
+    def test_known_own_team_excluded_nop_included(self):
+        from instantiate import target_allowlist
+        ts = target_allowlist(36, 42, "10.60.{}.1", 0)
+        self.assertTrue(all(t != 36 for t, _ in ts))   # never our own team
+        self.assertTrue(any(t == 0 for t, _ in ts))    # NOP still a target
