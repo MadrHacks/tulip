@@ -122,12 +122,15 @@ export interface Shape {
   last_seen: number;
 }
 
-export interface ClusterTemplate {
+// A shape's replay template: the ordered variable slot types the scaffold will
+// fill. flag_present is a neutral exfil SIGNAL (members whose response leaked a
+// flag), never a verdict.
+export interface ShapeTemplate {
   service: string;
-  cluster_id: number;
+  shape_id: number;
   tag: string;
   slots: string[];
-  version: number;
+  flag_present: number;
 }
 
 export interface Chain {
@@ -182,12 +185,15 @@ export interface Autonomy {
   error?: string;
 }
 
+// A candidate is a recurring shape whose responses leaked a flag
+// (flag_present) — a neutral exfil SIGNAL, not a verdict. runnable means the
+// shape carries a replay template; nop-proof is what confirms an exploit.
 export interface AttackCandidate {
   service: string;
-  cluster_id: number;
+  shape_id: number;
   tag: string;
-  flag_out: number;
-  n: number;
+  flag_present: number;
+  members: number;
   port: number;
   runnable: boolean;
 }

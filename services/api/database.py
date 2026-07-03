@@ -21,11 +21,11 @@ from psycopg.rows import class_row, dict_row
 import configurations
 from json_util import JsonFactory
 
-# Only surface RECURRING shapes in the cockpit: a cluster must have at least
-# MIN_SHAPE_SIZE members (mine.cluster.n) to appear in the Clusters view or as an
-# attack candidate. This is purely an API-side surfacing filter — singletons are
-# still clustered and tagged in the DB by minecore; the deeper fix is the pending
-# clustering redesign. Overridable via the MIN_SHAPE_SIZE env var (default 5).
+# Only surface RECURRING shapes in the cockpit: a shape must have at least
+# MIN_SHAPE_SIZE members (mine.shape.members) to appear in the Shapes view or as
+# an attack candidate. This is purely an API-side surfacing filter — singleton
+# shapes are still mined and tagged in the DB by minecore. Overridable via the
+# MIN_SHAPE_SIZE env var (default 5).
 MIN_SHAPE_SIZE = int(os.environ.get("MIN_SHAPE_SIZE", "5"))
 
 
@@ -310,40 +310,50 @@ class Connection(psycopg.Connection):
             """
         self.execute(sql_query, {"ids": ids, "tag": tag})
 
-    def cluster_templates(self) -> list[dict]:
+    def shape_templates(self) -> list[dict]:
+        """SHAPE replay templates read straight from mine.shape.
+
+        Only shapes that carry a replay template (template_body IS NOT NULL) are
+        returned; each row exposes the ordered slot types the scaffold fills in.
+        flag_present is an OBSERVED exfil SIGNAL (a member whose response leaked a
+        flag), never a verdict — the checker leaks flags too.
+
+        Returns [] when mine.shape does not exist yet (nothing mined).
+        """
         with self.cursor(row_factory=dict_row) as cursor:
-            if cursor.execute("SELECT to_regclass('mine.template') AS t").fetchone()["t"] is None:
+            if cursor.execute("SELECT to_regclass('mine.shape') AS t").fetchone()["t"] is None:
                 return []
             rows = cursor.execute(
                 """
-                SELECT service, cluster_id, body, version
-                FROM mine.template
-                ORDER BY updated_at DESC
+                SELECT service, shape_id, template_body, flag_present
+                FROM mine.shape
+                WHERE template_body IS NOT NULL
+                ORDER BY flag_present DESC
                 """
             ).fetchall()
         return [
             {
                 "service": row["service"],
-                "cluster_id": row["cluster_id"],
-                "tag": f"cluster:{row['service']}:{row['cluster_id']}",
-                "slots": [s.get("type") for s in ((row["body"] or {}).get("slots") or [])],
-                "version": row["version"],
+                "shape_id": row["shape_id"],
+                "tag": f"shape:{row['service']}:{row['shape_id']}",
+                "slots": [s.get("type") for s in ((row["template_body"] or {}).get("slots") or [])],
+                "flag_present": row["flag_present"],
             }
             for row in rows
         ]
 
-    def cluster_template_body(self, service: str, cluster_id: int) -> dict | None:
+    def shape_template_body(self, service: str, shape_id: int) -> dict | None:
         with self.cursor(row_factory=dict_row) as cursor:
-            if cursor.execute("SELECT to_regclass('mine.template') AS t").fetchone()["t"] is None:
+            if cursor.execute("SELECT to_regclass('mine.shape') AS t").fetchone()["t"] is None:
                 return None
             row = cursor.execute(
                 """
-                SELECT body FROM mine.template
-                WHERE service = %(service)s AND cluster_id = %(cid)s
+                SELECT template_body FROM mine.shape
+                WHERE service = %(service)s AND shape_id = %(sid)s
                 """,
-                {"service": service, "cid": cluster_id},
+                {"service": service, "sid": shape_id},
             ).fetchone()
-        return row["body"] if row else None
+        return row["template_body"] if row else None
 
     def shape_summaries(self) -> list[dict]:
         """Neutral SHAPE summaries read straight from mine.shape.
@@ -450,30 +460,33 @@ class Connection(psycopg.Connection):
         }
 
     def attack_candidates(self) -> list[dict]:
+        """Candidate SHAPES read straight from mine.shape.
+
+        A candidate is a recurring shape whose responses leaked a flag
+        (flag_present > 0) — an exfil SIGNAL, NOT a verdict. runnable means the
+        shape carries a replay template; nop-proof is what actually confirms an
+        exploit. Returns [] when mine.shape does not exist yet (nothing mined).
+        """
         with self.cursor(row_factory=dict_row) as cursor:
-            if cursor.execute("SELECT to_regclass('mine.attack_candidate') AS t").fetchone()["t"] is None:
+            if cursor.execute("SELECT to_regclass('mine.shape') AS t").fetchone()["t"] is None:
                 return []
             rows = cursor.execute(
                 """
-                SELECT ac.service, ac.cluster_id, ac.flag_out, ac.n, ac.port, ac.detected_at,
-                       (t.cluster_id IS NOT NULL) AS runnable
-                FROM mine.attack_candidate ac
-                JOIN mine.cluster c
-                  ON c.service = ac.service AND c.id = ac.cluster_id
-                LEFT JOIN mine.template t
-                  ON t.service = ac.service AND t.cluster_id = ac.cluster_id
-                WHERE c.n >= %(min_shape)s
-                ORDER BY ac.flag_out DESC
+                SELECT service, shape_id, flag_present, members, port,
+                       (template_body IS NOT NULL) AS runnable
+                FROM mine.shape
+                WHERE flag_present > 0 AND members >= %(min_shape)s
+                ORDER BY flag_present DESC
                 """,
                 {"min_shape": MIN_SHAPE_SIZE},
             ).fetchall()
         return [
             {
                 "service": r["service"],
-                "cluster_id": r["cluster_id"],
-                "tag": f"cluster:{r['service']}:{r['cluster_id']}",
-                "flag_out": r["flag_out"],
-                "n": r["n"],
+                "shape_id": r["shape_id"],
+                "tag": f"shape:{r['service']}:{r['shape_id']}",
+                "flag_present": r["flag_present"],
+                "members": r["members"],
                 "port": r["port"],
                 "runnable": r["runnable"],
             }

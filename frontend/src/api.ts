@@ -12,7 +12,7 @@ import {
   TicksAttackInfo,
   TicksAttackQuery,
   Shape,
-  ClusterTemplate,
+  ShapeTemplate,
   Chain,
   ChainBody,
   Heat,
@@ -235,12 +235,12 @@ export const tulipApi = createApi({
     getShapes: builder.query<Shape[], void>({
       query: () => "/shapes",
     }),
-    getTemplates: builder.query<ClusterTemplate[], void>({
+    getTemplates: builder.query<ShapeTemplate[], void>({
       query: () => "/templates",
     }),
-    getTemplateScaffold: builder.query<string, { service: string; clusterId: number }>({
-      query: ({ service, clusterId }) => ({
-        url: `/template_scaffold/${service}/${clusterId}`,
+    getTemplateScaffold: builder.query<string, { service: string; shapeId: number }>({
+      query: ({ service, shapeId }) => ({
+        url: `/template_scaffold/${service}/${shapeId}`,
         responseHandler: "text",
       }),
     }),

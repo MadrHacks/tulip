@@ -6,15 +6,15 @@ import { useGetTemplatesQuery, useLazyGetTemplateScaffoldQuery } from "../api";
 import { Tag } from "../components/Tag";
 import { useCopy } from "../hooks/useCopy";
 
-// Copies the instantiated scaffold for a cluster to the clipboard. Uses the
+// Copies the instantiated scaffold for a shape to the clipboard. Uses the
 // shared useCopy hook so it falls back to a temporary textarea + execCommand on
 // insecure origins (the cockpit is served over plain HTTP on a LAN/VPN IP, where
 // navigator.clipboard is undefined) instead of silently throwing.
-function ScaffoldCopyButton({ service, clusterId }: { service: string; clusterId: number }) {
+function ScaffoldCopyButton({ service, shapeId }: { service: string; shapeId: number }) {
   const [getScaffold] = useLazyGetTemplateScaffoldQuery();
   const { statusText, copy } = useCopy({
     getText: async () => {
-      const { data } = await getScaffold({ service, clusterId });
+      const { data } = await getScaffold({ service, shapeId });
       return data ?? "";
     },
   });
@@ -37,7 +37,7 @@ export function TemplatesView() {
   const sorted = useMemo(
     () => [...templates].sort((a, b) => {
       if (a.service !== b.service) return a.service.localeCompare(b.service);
-      return a.cluster_id - b.cluster_id;
+      return a.shape_id - b.shape_id;
     }),
     [templates]
   );
@@ -65,9 +65,9 @@ export function TemplatesView() {
           <thead>
             <tr className="border-b border-subtle bg-panel sticky top-0">
               <th className="px-3 py-2 text-left text-secondary font-semibold">Service</th>
-              <th className="px-3 py-2 text-left text-secondary font-semibold">Cluster</th>
+              <th className="px-3 py-2 text-left text-secondary font-semibold">Shape</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Slots</th>
-              <th className="px-3 py-2 text-center text-secondary font-semibold">Version</th>
+              <th className="px-3 py-2 text-center text-secondary font-semibold">Flag present</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Scaffold</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Tag</th>
             </tr>
@@ -75,12 +75,12 @@ export function TemplatesView() {
           <tbody>
             {sorted.map((template) => (
               <tr
-                key={`${template.service}-${template.cluster_id}`}
+                key={`${template.service}-${template.shape_id}`}
                 className="border-b border-subtle hover:bg-gray-500/10 cursor-pointer"
                 onClick={() => openTemplate(template.tag)}
               >
                 <td className="px-3 py-2 font-medium">{template.service}</td>
-                <td className="px-3 py-2 font-mono text-xs">{template.cluster_id}</td>
+                <td className="px-3 py-2 font-mono text-xs">{template.shape_id}</td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     {template.slots.map((slot) => (
@@ -93,9 +93,9 @@ export function TemplatesView() {
                     ))}
                   </div>
                 </td>
-                <td className="px-3 py-2 text-center font-mono">{template.version}</td>
+                <td className="px-3 py-2 text-center font-mono">{template.flag_present}</td>
                 <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                  <ScaffoldCopyButton service={template.service} clusterId={template.cluster_id} />
+                  <ScaffoldCopyButton service={template.service} shapeId={template.shape_id} />
                 </td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <Tag tag={template.tag} />

@@ -157,14 +157,14 @@ def getShapes():
 @application.route("/templates")
 def getTemplates():
     with db.connection() as c:
-        templates = c.cluster_templates()
+        templates = c.shape_templates()
     return return_json_response(templates)
 
 
-@application.route("/template_scaffold/<service>/<int:cluster_id>")
-def getTemplateScaffold(service, cluster_id):
+@application.route("/template_scaffold/<service>/<int:shape_id>")
+def getTemplateScaffold(service, shape_id):
     with db.connection() as c:
-        body = c.cluster_template_body(service, cluster_id)
+        body = c.shape_template_body(service, shape_id)
     if body is None:
         return return_text_response("template not found", status=404)
     return return_text_response(render_scaffold(body, service=service))

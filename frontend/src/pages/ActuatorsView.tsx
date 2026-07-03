@@ -27,10 +27,10 @@ function AutonomyPanel() {
         )}
       </div>
       <p className="text-xs text-secondary mb-3">
-        When armed, the loop auto-detects exploit clusters (scoreboard + flag-out),
-        proves them at NOP, and fans out to real teams — each exploit at each team
-        at most once per tick, rate- and budget-capped. Requires the replicator
-        armed too.
+        When armed, the loop picks up candidate shapes (a recurring shape whose
+        responses leaked a flag), proves each at NOP before trusting it, and fans
+        out to real teams — each exploit at each team at most once per tick, rate-
+        and budget-capped. Requires the replicator armed too.
       </p>
       <div className="flex items-center gap-4 flex-wrap">
         <span
