@@ -21,7 +21,7 @@ func init() {
 
 type fileCache struct {
 	mu    sync.Mutex
-	path  string
+	name  string
 	mtime time.Time
 	data  map[string]interface{}
 }
@@ -30,7 +30,10 @@ func (fc *fileCache) load() map[string]interface{} {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
-	st, err := os.Stat(fc.path)
+	// Resolve against configDir at load time, not at package init: init() sets
+	// configDir from AD_INFRA_CONFIG_DIR only after package vars are evaluated.
+	path := filepath.Join(configDir, fc.name)
+	st, err := os.Stat(path)
 	if err != nil {
 		return fc.data
 	}
@@ -38,14 +41,14 @@ func (fc *fileCache) load() map[string]interface{} {
 		return fc.data
 	}
 
-	raw, err := os.ReadFile(fc.path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fc.data
 	}
 
 	var data map[string]interface{}
 	if err := yaml.Unmarshal(raw, &data); err != nil {
-		fmt.Fprintf(os.Stderr, "config: parse %s: %v\n", fc.path, err)
+		fmt.Fprintf(os.Stderr, "config: parse %s: %v\n", path, err)
 		return fc.data
 	}
 
@@ -55,9 +58,9 @@ func (fc *fileCache) load() map[string]interface{} {
 }
 
 var (
-	gameFile     = &fileCache{path: filepath.Join(configDir, "game.yml")}
-	vulnboxFile  = &fileCache{path: filepath.Join(configDir, "vulnbox.yml")}
-	servicesFile = &fileCache{path: filepath.Join(configDir, "services.yml")}
+	gameFile     = &fileCache{name: "game.yml"}
+	vulnboxFile  = &fileCache{name: "vulnbox.yml"}
+	servicesFile = &fileCache{name: "services.yml"}
 )
 
 func getString(fc *fileCache, key string, fallback string) string {

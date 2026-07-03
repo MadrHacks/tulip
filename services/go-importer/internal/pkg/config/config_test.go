@@ -8,9 +8,9 @@ import (
 
 func TestServiceByPort(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "services.yml")
-	os.WriteFile(p, []byte("services:\n  - name: CCalendar\n    ports: [3000, 3001]\n  - name: ExCCel\n    ports: [5000]\n"), 0o644)
-	servicesFile = &fileCache{path: p}
+	os.WriteFile(filepath.Join(dir, "services.yml"), []byte("services:\n  - name: CCalendar\n    ports: [3000, 3001]\n  - name: ExCCel\n    ports: [5000]\n"), 0o644)
+	configDir = dir
+	servicesFile = &fileCache{name: "services.yml"}
 
 	m := ServiceByPort()
 	want := map[int]string{3000: "CCalendar", 3001: "CCalendar", 5000: "ExCCel"}
@@ -26,9 +26,9 @@ func TestServiceByPort(t *testing.T) {
 
 func TestScoreboardBaseURLAndTeamID(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "game.yml")
-	os.WriteFile(p, []byte("gameserver_url: http://10.10.0.1:8080/flags\nteam_id: 36\n"), 0o644)
-	gameFile = &fileCache{path: p}
+	os.WriteFile(filepath.Join(dir, "game.yml"), []byte("gameserver_url: http://10.10.0.1:8080/flags\nteam_id: 36\n"), 0o644)
+	configDir = dir
+	gameFile = &fileCache{name: "game.yml"}
 
 	if got := ScoreboardBaseURL(); got != "http://10.10.0.1" {
 		t.Errorf("ScoreboardBaseURL = %q, want http://10.10.0.1", got)
