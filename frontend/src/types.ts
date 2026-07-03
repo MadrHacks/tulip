@@ -162,6 +162,26 @@ export interface ActuatorsAudit {
   patch_engine: AuditEntry[] | { error?: string };
 }
 
+export interface Autonomy {
+  auto_armed?: boolean;
+  replicator_armed?: boolean;
+  tripped?: boolean;
+  tick?: number;
+  proven?: string[];
+  reachable?: boolean;
+  error?: string;
+}
+
+export interface AttackCandidate {
+  service: string;
+  cluster_id: number;
+  tag: string;
+  flag_out: number;
+  n: number;
+  port: number;
+  runnable: boolean;
+}
+
 export interface ChainPlanStep {
   service: string;
   port: number;

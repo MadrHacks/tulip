@@ -2,8 +2,70 @@ import {
   useGetActuatorsStatusQuery,
   useGetActuatorsAuditQuery,
   useActuatorControlMutation,
+  useGetAutonomyQuery,
+  useGetCandidatesQuery,
 } from "../api";
 import { ActuatorState, AuditEntry } from "../types";
+
+function AutonomyPanel() {
+  const { data: auto } = useGetAutonomyQuery(undefined, { pollingInterval: 3000 });
+  const { data: candidates = [] } = useGetCandidatesQuery(undefined, { pollingInterval: 5000 });
+  const [control, { isLoading }] = useActuatorControlMutation();
+
+  const reachable = auto && auto.reachable !== false;
+  const armed = !!auto?.auto_armed;
+  const runnable = candidates.filter((c) => c.runnable).length;
+
+  return (
+    <div className="rounded-lg border-2 border-subtle bg-panel p-4 mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-bold text-lg">Autonomy</h2>
+        {reachable && auto?.tripped && (
+          <span className="text-xs px-2 py-0.5 rounded bg-red-500/25 text-red-600 dark:text-red-400 font-semibold">
+            BREAKER TRIPPED
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-secondary mb-3">
+        When armed, the loop auto-detects exploit clusters (scoreboard + flag-out),
+        proves them at NOP, and fans out to real teams — each exploit at each team
+        at most once per tick, rate- and budget-capped. Requires the replicator
+        armed too.
+      </p>
+      <div className="flex items-center gap-4 flex-wrap">
+        <span
+          className={`text-sm px-2 py-1 rounded ${
+            armed
+              ? "bg-red-500/25 text-red-600 dark:text-red-400 font-semibold"
+              : "bg-green-500/20 text-green-600 dark:text-green-400"
+          }`}
+        >
+          auto {armed ? "ARMED" : "off"}
+        </span>
+        <span className="text-xs text-secondary">
+          replicator {auto?.replicator_armed ? "armed" : "disarmed"} · tick {auto?.tick ?? "—"} ·{" "}
+          {auto?.proven?.length ?? 0} proven · {runnable}/{candidates.length} candidates runnable
+        </span>
+        <div className="ml-auto flex gap-2">
+          <button
+            className="btn-primary text-xs disabled:opacity-40"
+            disabled={!reachable || armed || isLoading}
+            onClick={() => control({ which: "replicator", action: "auto_arm" })}
+          >
+            Arm autonomy
+          </button>
+          <button
+            className="px-3 py-1 rounded text-xs bg-red-600 text-white font-semibold disabled:opacity-40"
+            disabled={!reachable || isLoading}
+            onClick={() => control({ which: "replicator", action: "auto_disarm" })}
+          >
+            KILL
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ActuatorCard({
   title,
@@ -115,6 +177,7 @@ export function ActuatorsView() {
         every fire path stays gated (anti-leak allowlist, NOP-proven before
         fan-out, SLA-safe patches) even once armed.
       </p>
+      <AutonomyPanel />
       <div className="flex flex-wrap gap-4 mb-6">
         <ActuatorCard
           title="Replicator"

@@ -18,6 +18,8 @@ import {
   Heat,
   ActuatorsStatus,
   ActuatorsAudit,
+  Autonomy,
+  AttackCandidate,
 } from "./types";
 
 function base64DecodeUnicode(str: string) : string {
@@ -257,11 +259,20 @@ export const tulipApi = createApi({
     getActuatorsAudit: builder.query<ActuatorsAudit, void>({
       query: () => "/actuators/audit",
     }),
-    actuatorControl: builder.mutation<unknown, { which: string; action: "arm" | "disarm" }>({
+    actuatorControl: builder.mutation<
+      unknown,
+      { which: string; action: "arm" | "disarm" | "auto_arm" | "auto_disarm" }
+    >({
       query: ({ which, action }) => ({
         url: `/actuators/${which}/${action}`,
         method: "POST",
       }),
+    }),
+    getAutonomy: builder.query<Autonomy, void>({
+      query: () => "/autonomy",
+    }),
+    getCandidates: builder.query<AttackCandidate[], void>({
+      query: () => "/candidates",
     }),
     getChainBody: builder.query<ChainBody, number>({
       query: (chainId) => `/chain/${chainId}`,
@@ -308,6 +319,8 @@ export const {
   useGetActuatorsStatusQuery,
   useGetActuatorsAuditQuery,
   useActuatorControlMutation,
+  useGetAutonomyQuery,
+  useGetCandidatesQuery,
   useFlowTagMutation,
   useFlowsTagBulkMutation,
 } = tulipApi;

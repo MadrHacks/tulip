@@ -220,13 +220,25 @@ def actuatorsAudit():
 @application.route("/actuators/<which>/<action>", methods=["POST"])
 def actuatorControl(which, action):
     base = _ACTUATORS.get(which)
-    if base is None or action not in ("arm", "disarm"):
+    if base is None or action not in ("arm", "disarm", "auto_arm", "auto_disarm"):
         return return_json_response({"error": "bad request"}, status=400)
     try:
         resp = post(f"{base}/{action}", json={}, timeout=5)
         return return_json_response(resp.json(), status=resp.status_code)
     except Exception as exc:
         return return_json_response({"reachable": False, "error": str(exc)}, status=502)
+
+
+@application.route("/autonomy")
+def autonomyStatus():
+    return return_json_response(_actuator_get(REPLICATOR_URL, "/auto_status"))
+
+
+@application.route("/candidates")
+def getCandidates():
+    with db.connection() as c:
+        cands = c.attack_candidates()
+    return return_json_response(cands)
 
 
 @application.route("/chains")

@@ -437,6 +437,33 @@ class Connection(psycopg.Connection):
             for row in rows
         }
 
+    def attack_candidates(self) -> list[dict]:
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.attack_candidate') AS t").fetchone()["t"] is None:
+                return []
+            rows = cursor.execute(
+                """
+                SELECT ac.service, ac.cluster_id, ac.flag_out, ac.n, ac.port, ac.detected_at,
+                       (t.cluster_id IS NOT NULL) AS runnable
+                FROM mine.attack_candidate ac
+                LEFT JOIN mine.template t
+                  ON t.service = ac.service AND t.cluster_id = ac.cluster_id
+                ORDER BY ac.flag_out DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "service": r["service"],
+                "cluster_id": r["cluster_id"],
+                "tag": f"cluster:{r['service']}:{r['cluster_id']}",
+                "flag_out": r["flag_out"],
+                "n": r["n"],
+                "port": r["port"],
+                "runnable": r["runnable"],
+            }
+            for r in rows
+        ]
+
     def stats_query(self, query: StatsQuery) -> dict[int, Stats]:
         now = datetime.now(tz=timezone.utc)
         tick_first = dateutil.parser.parse(configurations.start_date)
