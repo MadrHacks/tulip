@@ -112,6 +112,25 @@ export interface Cluster {
   flag_in: number;
 }
 
+// A Shape is a NEUTRAL recurring request pattern mined from flows. Every field
+// is an observed SIGNAL, never a verdict: flag_present counts members whose
+// response leaked a flag (a candidate-exfil signal — the checker leaks flags
+// too, so this is not proof of an attack), flag_in counts members that stored a
+// flag. "Exploit" status is earned later (nop-proof / human), not asserted here.
+export interface Shape {
+  tag: string;
+  service: string;
+  shape_id: number;
+  template: string;
+  members: number;
+  flag_present: number;
+  flag_in: number;
+  actors: Record<string, number>;
+  size: number;
+  first_seen: number;
+  last_seen: number;
+}
+
 export interface ClusterTemplate {
   service: string;
   cluster_id: number;

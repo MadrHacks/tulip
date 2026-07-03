@@ -410,6 +410,55 @@ class Connection(psycopg.Connection):
             ).fetchone()
         return row["body"] if row else None
 
+    def shape_summaries(self) -> list[dict]:
+        """Neutral SHAPE summaries read straight from mine.shape.
+
+        A shape is a recurring request pattern; every field returned is an
+        OBSERVED SIGNAL, not a verdict. flag_present counts members whose
+        response leaked a flag (a candidate-exfil signal — the checker also
+        leaks flags, so this is NOT proof of an attack). flag_in counts members
+        that stored a flag. No attack/verdict field is produced here.
+
+        Returns [] when mine.shape does not exist yet (nothing mined).
+        """
+        with self.cursor(row_factory=dict_row) as cursor:
+            if cursor.execute("SELECT to_regclass('mine.shape') AS t").fetchone()["t"] is None:
+                return []
+            rows = cursor.execute(
+                """
+                SELECT service, shape_id, template, members, size_bucket_sum,
+                       flag_present, flag_in, actors, first_seen, last_seen
+                FROM mine.shape
+                ORDER BY flag_present DESC, members DESC
+                """
+            ).fetchall()
+
+        result = []
+        for row in rows:
+            members = row["members"] or 0
+            # size_bucket_sum sums floor(log2(bodyLen+1)) over members, so the
+            # per-member average bucket back through 2**x is a representative
+            # response size in bytes (0 when the shape has no members yet).
+            size = int(2 ** (row["size_bucket_sum"] / members)) if members > 0 else 0
+            # actors is jsonb (UA -> count); psycopg decodes it to a dict.
+            actors = row["actors"] or {}
+            result.append(
+                {
+                    "service": row["service"],
+                    "shape_id": row["shape_id"],
+                    "tag": f"shape:{row['service']}:{row['shape_id']}",
+                    "template": row["template"],
+                    "members": members,
+                    "flag_present": row["flag_present"],
+                    "flag_in": row["flag_in"],
+                    "actors": actors,
+                    "size": size,
+                    "first_seen": row["first_seen"],
+                    "last_seen": row["last_seen"],
+                }
+            )
+        return result
+
     def chain_summaries(self) -> list[dict]:
         with self.cursor(row_factory=dict_row) as cursor:
             if cursor.execute("SELECT to_regclass('mine.chain_template') AS t").fetchone()["t"] is None:

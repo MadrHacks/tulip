@@ -160,6 +160,13 @@ def getClusters():
     return return_json_response(clusters)
 
 
+@application.route("/shapes")
+def getShapes():
+    with db.connection() as c:
+        shapes = c.shape_summaries()
+    return return_json_response(shapes)
+
+
 @application.route("/templates")
 def getTemplates():
     with db.connection() as c:

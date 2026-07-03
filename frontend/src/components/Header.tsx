@@ -336,6 +336,11 @@ export function Header() {
             Clusters
           </button>
         </Link>
+        <Link to={`/shapes?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Shapes
+          </button>
+        </Link>
         <Link to={`/templates?${searchParams}`} className="flex items-center">
           <button className="btn-primary">
             Templates

@@ -9,6 +9,7 @@ import { FlowList } from "./components/FlowList";
 import { FlowView } from "./pages/FlowView";
 import { DiffView } from "./pages/DiffView";
 import { ClustersView } from "./pages/ClustersView";
+import { ShapesView } from "./pages/ShapesView";
 import { TemplatesView } from "./pages/TemplatesView";
 import { ChainsView } from "./pages/ChainsView";
 import { ActuatorsView } from "./pages/ActuatorsView";
@@ -44,6 +45,14 @@ function App() {
               element={
                 <Suspense>
                   <ClustersView />
+                </Suspense>
+              }
+            />
+            <Route
+              path="shapes"
+              element={
+                <Suspense>
+                  <ShapesView />
                 </Suspense>
               }
             />

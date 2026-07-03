@@ -12,6 +12,7 @@ import {
   TicksAttackInfo,
   TicksAttackQuery,
   Cluster,
+  Shape,
   ClusterTemplate,
   Chain,
   ChainBody,
@@ -238,6 +239,9 @@ export const tulipApi = createApi({
         params: arg && arg.since !== undefined ? { since: arg.since } : {},
       }),
     }),
+    getShapes: builder.query<Shape[], void>({
+      query: () => "/shapes",
+    }),
     getTemplates: builder.query<ClusterTemplate[], void>({
       query: () => "/templates",
     }),
@@ -311,6 +315,7 @@ export const {
   useGetStatsQuery,
   useGetUnderAttackQuery,
   useGetClustersQuery,
+  useGetShapesQuery,
   useGetTemplatesQuery,
   useLazyGetTemplateScaffoldQuery,
   useGetChainsQuery,
