@@ -26,6 +26,25 @@ function base64DecodeUnicode(str: string) : string {
   return new TextDecoder().decode(bytes);
 }
 
+// decodeRank scores a representation kind as [decrypted-root, converter-depth].
+// Tulip layers representations as a base kind ("raw"/"decrypted") plus converter
+// chains named "<parent> -> <converter>"; a deeper chain is more decoded.
+function decodeRank(kind: string): [number, number] {
+  const root = kind.startsWith("decrypted") ? 1 : 0;
+  const depth = (kind.match(/ -> /g) || []).length;
+  return [root, depth];
+}
+
+// mostDecodedFirst sorts kinds so the most-decoded (upmost) layer comes first.
+// Shared rule with minecore's backend topmost selection.
+function mostDecodedFirst(a: string, b: string): number {
+  const ra = decodeRank(a);
+  const rb = decodeRank(b);
+  if (ra[0] !== rb[0]) return rb[0] - ra[0];
+  if (ra[1] !== rb[1]) return rb[1] - ra[1];
+  return a < b ? 1 : a > b ? -1 : 0;
+}
+
 export const tulipApi = createApi({
   baseQuery: fetchBaseQuery({ baseUrl: API_BASE_PATH }),
   endpoints: (builder) => ({
@@ -51,6 +70,14 @@ export const tulipApi = createApi({
           });
         }
 
+        // Order representations most-decoded first, so index 0 (the default
+        // view) is the upmost layer: the deepest converter chain, decrypted root
+        // preferred. Mirrors minecore's topmost rule so the UI shows what the
+        // analyzer actually reasons over.
+        const orderedReprs = (Object.values(representations) as any[]).sort(
+          (a, b) => mostDecodedFirst(a.type, b.type)
+        );
+
         return {
           id: flow.id,
           src_port: flow.port_src,
@@ -71,7 +98,7 @@ export const tulipApi = createApi({
           service_tag: "",
           suricata: [],
           signatures: flow.signatures,
-          flow: Object.values(representations),
+          flow: orderedReprs,
         };
       },
     }),
