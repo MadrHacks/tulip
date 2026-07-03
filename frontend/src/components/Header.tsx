@@ -346,6 +346,11 @@ export function Header() {
             Chains
           </button>
         </Link>
+        <Link to={`/actuators?${searchParams}`} className="flex items-center">
+          <button className="btn-primary">
+            Actuators
+          </button>
+        </Link>
         <button
           className="btn-primary"
           onClick={() => setShowDiffPanel((v) => !v)}

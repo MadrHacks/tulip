@@ -137,6 +137,31 @@ export interface Heat {
   our_sla_ok: boolean;
 }
 
+export interface ActuatorState {
+  armed?: boolean;
+  proven?: string[];
+  reachable?: boolean;
+  error?: string;
+}
+
+export interface ActuatorsStatus {
+  replicator: ActuatorState;
+  patch_engine: ActuatorState;
+}
+
+export interface AuditEntry {
+  capability?: string;
+  action?: string;
+  level?: string;
+  subject?: string;
+  decision?: { allow?: boolean; reason?: string };
+}
+
+export interface ActuatorsAudit {
+  replicator: AuditEntry[] | { error?: string };
+  patch_engine: AuditEntry[] | { error?: string };
+}
+
 export interface ChainPlanStep {
   service: string;
   port: number;

@@ -28,7 +28,7 @@ import re
 import traceback
 import uuid
 from flask import Flask, Response, send_file
-from requests import get
+from requests import get, post
 import dateutil.parser
 from ipaddress import ip_network
 from fuzzyhash import fuzzyhash_filter_flows
@@ -181,6 +181,52 @@ def getHeat():
     with db.connection() as c:
         heat = c.heat_summaries()
     return return_json_response(heat)
+
+
+# The actuators (replicator/patch-engine) are only reachable through this API, so
+# the browser never talks to them directly and the gating stays server-side.
+REPLICATOR_URL = os.environ.get("REPLICATOR_URL", "http://replicator:8080")
+PATCH_ENGINE_URL = os.environ.get("PATCH_ENGINE_URL", "http://patch-engine:8081")
+_ACTUATORS = {"replicator": REPLICATOR_URL, "patch": PATCH_ENGINE_URL}
+
+
+def _actuator_get(base, path):
+    try:
+        return get(f"{base}{path}", timeout=3).json()
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc)}
+
+
+@application.route("/actuators/status")
+def actuatorsStatus():
+    return return_json_response(
+        {
+            "replicator": _actuator_get(REPLICATOR_URL, "/status"),
+            "patch_engine": _actuator_get(PATCH_ENGINE_URL, "/status"),
+        }
+    )
+
+
+@application.route("/actuators/audit")
+def actuatorsAudit():
+    return return_json_response(
+        {
+            "replicator": _actuator_get(REPLICATOR_URL, "/audit"),
+            "patch_engine": _actuator_get(PATCH_ENGINE_URL, "/audit"),
+        }
+    )
+
+
+@application.route("/actuators/<which>/<action>", methods=["POST"])
+def actuatorControl(which, action):
+    base = _ACTUATORS.get(which)
+    if base is None or action not in ("arm", "disarm"):
+        return return_json_response({"error": "bad request"}, status=400)
+    try:
+        resp = post(f"{base}/{action}", json={}, timeout=5)
+        return return_json_response(resp.json(), status=resp.status_code)
+    except Exception as exc:
+        return return_json_response({"reachable": False, "error": str(exc)}, status=502)
 
 
 @application.route("/chains")
