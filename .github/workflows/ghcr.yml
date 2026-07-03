@@ -2,7 +2,7 @@ name: Build & Push Images to GHCR
 
 on:
   push:
-    branches: [master]
+    branches: [master, attack-miner]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -43,6 +43,16 @@ jobs:
           - name: tulip-suricata
             context: services/suricata
             file: services/suricata/Dockerfile
+          - name: tulip-minecore
+            context: services/go-importer
+            file: services/go-importer/Dockerfile
+            target: minecore
+          - name: tulip-replicator
+            context: services/replicator
+            file: services/replicator/Dockerfile
+          - name: tulip-patch-engine
+            context: services/patch-engine
+            file: services/patch-engine/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
