@@ -97,10 +97,11 @@ func findInjectSlot(template *Template, request, value []byte) int {
 	return -1
 }
 
-// parseClusterTag splits a "cluster:<service>:<id>" tag.
-func parseClusterTag(tag string) (string, int64, bool) {
+// parseShapeTag splits a "shape:<service>:<id>" tag into its service and shape
+// id. A chain step's identity is the flow's shape tag (see observeChain).
+func parseShapeTag(tag string) (string, int64, bool) {
 	parts := strings.SplitN(tag, ":", 3)
-	if len(parts) != 3 || parts[0] != "cluster" {
+	if len(parts) != 3 || parts[0] != "shape" {
 		return "", 0, false
 	}
 	id, err := strconv.ParseInt(parts[2], 10, 64)
@@ -110,11 +111,14 @@ func parseClusterTag(tag string) (string, int64, bool) {
 	return parts[1], id, true
 }
 
-func loadTemplateBody(ctx context.Context, pool *pgxpool.Pool, service string, clusterID int64) json.RawMessage {
+// loadShapeTemplateBody returns a shape's persisted replay template
+// (mine.shape.template_body), or nil when the shape has no template yet (below
+// quorum) or the row is absent.
+func loadShapeTemplateBody(ctx context.Context, pool *pgxpool.Pool, service string, shapeID int64) json.RawMessage {
 	var body json.RawMessage
 	err := pool.QueryRow(ctx,
-		`SELECT body FROM mine.template WHERE service = $1 AND cluster_id = $2`,
-		service, clusterID).Scan(&body)
+		`SELECT template_body FROM mine.shape WHERE service = $1 AND shape_id = $2`,
+		service, shapeID).Scan(&body)
 	if err != nil {
 		return nil
 	}
@@ -122,7 +126,7 @@ func loadTemplateBody(ctx context.Context, pool *pgxpool.Pool, service string, c
 }
 
 // lowerChain turns a settled chain into a runnable plan: each step's single-flow
-// template (fetched by its cluster identity) plus, per link, a regex extracting
+// template (fetched by its shape identity) plus, per link, a regex extracting
 // the carried value from the producer's response and the consumer slot to inject
 // it into. Returns nil (best effort) if any step template or link locator is
 // unavailable; the reusable pattern is persisted regardless.
@@ -131,11 +135,11 @@ func (e *Engine) lowerChain(ctx context.Context, sc settledChain) *ChainPlan {
 	steps := make([]ChainPlanStep, len(sc.Template.Steps))
 	templates := make([]*Template, len(sc.Template.Steps))
 	for i, step := range sc.Template.Steps {
-		service, cid, ok := parseClusterTag(step.ClusterID)
+		service, sid, ok := parseShapeTag(step.ClusterID)
 		if !ok {
 			return nil
 		}
-		body := loadTemplateBody(ctx, pool, service, cid)
+		body := loadShapeTemplateBody(ctx, pool, service, sid)
 		if body == nil {
 			return nil
 		}

@@ -35,8 +35,8 @@ func synthesizeShapeTemplate(samples [][]byte, flagRe *regexp.Regexp, flagIDs ma
 
 // SynthesizeTemplates (re)builds the replay template for every shape that has
 // reached quorum in its reservoir, stashing it on the shape so the snapshot path
-// persists it. It is the shape-substrate twin of Engine.synthesizeTemplates, but
-// runs purely over the in-memory reservoir (no DB re-fetch). Existing templates
+// persists it. It runs purely over the in-memory reservoir (no DB re-fetch),
+// aligning each shape's raw samples into typed slots. Existing templates
 // are kept when a shape has too few samples or no shared shape, so a transient
 // dip never erases a good template. Returns the number of shapes (re)templated.
 func (ss *ShapeStore) SynthesizeTemplates(flagRe *regexp.Regexp, flagIDs map[string]bool) int {

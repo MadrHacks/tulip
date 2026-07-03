@@ -32,6 +32,7 @@ const defaultMaxShapes = 4096 // per-service shape cap
 // memory stays bounded: <= shapeReservoirCap * shapeSampleCap per shape.
 const (
 	shapeReservoirCap = 8               // raw-unit samples kept per shape for alignment
+	maxFeatureBytes   = 8192            // 8 KB captures a request's shape (a bounded per-sample cap)
 	shapeSampleCap    = maxFeatureBytes // truncate each stored sample (8 KB captures a request's shape)
 )
 
@@ -254,6 +255,18 @@ func (ss *ShapeStore) FlagShapes(service string) []FlagShape {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// Services returns the names of every service shard currently in the store,
+// sorted, so callers (e.g. the detection service-name sanity check) can compare
+// the mined services against the scoreboard's names.
+func (ss *ShapeStore) Services() []string {
+	out := make([]string, 0, len(ss.shards))
+	for svc := range ss.shards {
+		out = append(out, svc)
+	}
+	sort.Strings(out)
 	return out
 }
 

@@ -103,15 +103,6 @@ export interface TicksAttackQuery {
   to_tick: number;
 }
 
-export interface Cluster {
-  tag: string;
-  service: string;
-  id: number;
-  count: number;
-  flag_out: number;
-  flag_in: number;
-}
-
 // A Shape is a NEUTRAL recurring request pattern mined from flows. Every field
 // is an observed SIGNAL, never a verdict: flag_present counts members whose
 // response leaked a flag (a candidate-exfil signal — the checker leaks flags

@@ -1,8 +1,8 @@
 // Package mine is minecore: the per-flow streaming analysis brain. It reads
-// committed flows from Timescale in a horizon-bounded poll cursor, clusters and
-// mines them, and writes results back as tags and derived flow items. It is a
-// pure analysis engine with no external side-effects (no traffic to opponents,
-// no firewall control); those live in the separate actuators.
+// committed flows from Timescale in a horizon-bounded poll cursor, mines them
+// into request shapes, and writes results back as tags and derived flow items.
+// It is a pure analysis engine with no external side-effects (no traffic to
+// opponents, no firewall control); those live in the separate actuators.
 package mine
 
 import (
@@ -29,9 +29,7 @@ type Engine struct {
 	db  *db.Database
 	cfg Config
 
-	shards        map[string]*clusterStore
-	shapeStore    *ShapeStore // parallel neutral request-shape path (runs alongside shards)
-	calibrators   map[string]*Calibrator
+	shapeStore    *ShapeStore // neutral request-shape path: the sole request-mining substrate
 	serviceByPort map[int]string
 	resolver      *serviceResolver
 	flagRe        *regexp.Regexp
@@ -42,15 +40,11 @@ type Engine struct {
 	flagIDsAt      time.Time
 	lastSnapshotAt time.Time
 
-	templatedAt     map[string]int
-	lastSynthAt     time.Time
 	lastPropagateAt time.Time
 	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
 
-	dataClock               int64 // newest flow time seen (unix sec), drives eviction
 	lastDetectAt            time.Time
 	warnedServiceMismatch   bool            // one-shot: config names don't match the scoreboard
-	interactiveSynthed      map[string]bool // "service:cluster_id" attempted once for interactive synthesis
 	shapeInteractiveSynthed map[string]bool // "service:shape_id" attempted once for shape interactive synthesis
 
 	chains           map[string]*chainAnalyzer // per service
@@ -70,16 +64,12 @@ func New(database *db.Database, cfg Config) *Engine {
 	return &Engine{
 		db:                      database,
 		cfg:                     cfg,
-		shards:                  map[string]*clusterStore{},
 		shapeStore:              NewShapeStore(cfg.MaxShapes),
-		calibrators:             map[string]*Calibrator{},
 		serviceByPort:           config.ServiceByPort(),
 		resolver:                newServiceResolver(config.ServiceDefs()),
 		flagRe:                  regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:            config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
-		templatedAt:             map[string]int{},
 		verdicts:                map[string]string{},
-		interactiveSynthed:      map[string]bool{},
 		shapeInteractiveSynthed: map[string]bool{},
 		chains:                  map[string]*chainAnalyzer{},
 		chainClusters:           newChainClusterStore(),
@@ -106,7 +96,7 @@ func parseGameStart(s string) time.Time {
 
 func (e *Engine) Run(ctx context.Context) {
 	EnsureSchema(ctx, e.db.Pool())
-	e.loadShards(ctx)
+	e.loadShapes(ctx)
 	loadChainClusters(ctx, e.db.Pool(), e.chainClusters)
 	go e.pollHeatLoop(ctx)
 	cursor := e.loadCursor(ctx)
@@ -134,7 +124,6 @@ func (e *Engine) Run(ctx context.Context) {
 			e.saveCursor(ctx, cursor)
 		}
 		e.maybeSnapshot(ctx)
-		e.maybeSynthesize(ctx)
 		e.maybePropagate(ctx)
 		e.maybeChainSynthesize(ctx)
 		e.maybeDetect(ctx)
@@ -147,10 +136,10 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// handle clusters one flow and tags it with its cluster identity. It fetches the
-// flow's most-decoded bytes for both directions in a single query, so clustering
-// and chain analysis both run on the topmost representation (TLS-decrypted,
-// base64-decoded, or whatever the flow's deepest decoder produced).
+// handle mines one flow and tags it with its neutral shape identities. It
+// fetches the flow's most-decoded bytes for both directions in a single query,
+// so shape and chain analysis both run on the topmost representation (TLS-
+// decrypted, base64-decoded, or whatever the flow's deepest decoder produced).
 func (e *Engine) handle(f *Flow) {
 	client, server, err := e.db.FlowAnalysisData(f.Id)
 	if err != nil {
@@ -161,44 +150,18 @@ func (e *Engine) handle(f *Flow) {
 		return
 	}
 
-	// Truncate the canonical form before masking so both stay cheap on large
-	// bodies: 8 KB captures a request's shape, and masking then runs over that.
-	canon := canonical(client)
-	if len(canon) > maxFeatureBytes {
-		canon = canon[:maxFeatureBytes]
-	}
-	sig, _ := Featurize(maskValues(canon, e.flagRe, e.fidRe))
-
 	t := f.Time.Unix()
-	if t > e.dataClock {
-		e.dataClock = t
-	}
-
 	service := e.serviceName(f.DstPort)
-	store := e.shards[service]
-	if store == nil {
-		store = newClusterStore(e.cfg.MergeThreshold)
-		e.shards[service] = store
-	}
-	id, _ := store.Assign(sig, t, f.FlagsOut > 0, f.DstPort)
 
-	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
-	// role:* tags are intentionally not emitted: under NAT the checker/exploit
-	// calibration is a wrong-category signal (pure cockpit noise). The calibrator
-	// plumbing (roleTag/calibrators) is retained pending a larger rework.
-	tags := []string{clusterTag}
-	// A fresh flow matching a cluster the operator already judged inherits that
-	// verdict immediately, in the same write — no periodic bulk propagation.
-	if sugg := e.verdicts[clusterTag]; sugg != "" {
-		tags = append(tags, sugg)
-	}
-	// Parallel shape path: fold the flow's ordered messages into the neutral
-	// shape store and add its shape:/session: tags to the SAME write. This runs
-	// alongside — never in place of — the cluster tagging above.
-	tags = append(tags, e.shapeTags(f, service, t)...)
+	// Neutral shape path: fold the flow's ordered messages into the shape store
+	// and write its shape:/session: tags. This is the sole request-mining
+	// substrate (the old MinHash cluster path has been retired).
+	tags := e.shapeTags(f, service, t)
 	e.db.FlowAddTags(f.Id, tags)
+	// The chain analyzer keys each step by the flow's single shape identity; the
+	// runnable-plan lowering later fetches that shape's replay template.
 	if !e.cfg.ChainDisable {
-		e.observeChain(f, service, clusterTag, client, server)
+		e.observeChain(f, service, primaryShapeTag(tags), client, server)
 	}
 }
 
@@ -217,9 +180,10 @@ func (e *Engine) chainShard(service string) *chainAnalyzer {
 // observeChain feeds the flow's high-entropy tokens into its service's chain
 // analyzer: values the service hands out (server->client) as producers, values
 // the client sends as consumers. Cross-flow reuse of a value links the two flows.
-func (e *Engine) observeChain(f *Flow, service, clusterTag string, clientData, serverData []byte) {
+// stepTag is the flow's shape identity, carried as each step's single-flow key.
+func (e *Engine) observeChain(f *Flow, service, stepTag string, clientData, serverData []byte) {
 	e.chainShard(service).Observe(
-		f.Id.String(), f.Time.Unix(), f.DstPort, clusterTag,
+		f.Id.String(), f.Time.Unix(), f.DstPort, stepTag,
 		ExtractTokens(serverData), ExtractTokens(clientData),
 	)
 }
@@ -276,18 +240,10 @@ func (e *Engine) refreshFlagIDs() {
 	e.flagIDsAt = time.Now()
 }
 
-func (e *Engine) loadShards(ctx context.Context) {
-	// Skip clusters last seen before the horizon: a restart after downtime must
-	// not reload long-dead clusters into RAM.
-	floor := time.Now().Unix() - int64(e.cfg.Horizon.Seconds())
-	for service, snaps := range loadClusterSnapshots(ctx, e.db.Pool()) {
-		e.shards[service] = restoreClusterStore(snaps, floor, e.cfg.MergeThreshold)
-	}
-	for service, snaps := range loadCalibratorSnapshots(ctx, e.db.Pool()) {
-		e.calibrators[service] = restoreCalibrator(snaps)
-	}
-	// Restore the parallel shape store from mine.shape: rebuilding each shard's
-	// Drain from the persisted templates keeps shape ids stable across a restart.
+// loadShapes restores the shape store from mine.shape at startup: rebuilding
+// each shard's Drain from the persisted templates keeps shape ids stable across
+// a restart.
+func (e *Engine) loadShapes(ctx context.Context) {
 	e.shapeStore = restoreShapeStore(loadShapeSnapshots(ctx, e.db.Pool()), e.cfg.MaxShapes)
 	e.lastSnapshotAt = time.Now()
 }
@@ -296,35 +252,6 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 	if !e.lastSnapshotAt.IsZero() && time.Since(e.lastSnapshotAt) < snapshotInterval {
 		return
 	}
-	e.evictClusters(ctx)
-	before := e.dataClock - int64(e.cfg.Horizon.Seconds())
-	for service, store := range e.shards {
-		saveClusterSnapshots(ctx, e.db.Pool(), service, store.snapshot())
-	}
-	for service, calib := range e.calibrators {
-		if gone := calib.evictStale(before); len(gone) > 0 {
-			deleteCalibratorSources(ctx, e.db.Pool(), service, gone)
-		}
-		saveCalibratorSnapshots(ctx, e.db.Pool(), service, calib.snapshot())
-	}
 	e.snapshotShapes(ctx)
 	e.lastSnapshotAt = time.Now()
-}
-
-// evictClusters bounds each service shard: it drops clusters not seen within the
-// horizon (their flows are past the read window) and enforces the hard cap by
-// least-recently-seen, deleting the evicted rows and their template bookkeeping.
-func (e *Engine) evictClusters(ctx context.Context) {
-	before := e.dataClock - int64(e.cfg.Horizon.Seconds())
-	for service, store := range e.shards {
-		gone := store.evictStale(before)
-		gone = append(gone, store.evictToCap(e.cfg.MaxClusters)...)
-		if len(gone) == 0 {
-			continue
-		}
-		deleteClusters(ctx, e.db.Pool(), service, gone)
-		for _, id := range gone {
-			delete(e.templatedAt, fmt.Sprintf("%s:%d", service, id))
-		}
-	}
 }

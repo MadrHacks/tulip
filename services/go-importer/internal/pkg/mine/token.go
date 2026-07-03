@@ -207,3 +207,14 @@ func IsHighEntropyToken(s []byte) bool {
 		return false
 	}
 }
+
+// hash64 is the 64-bit FNV-1a hash of b. It is the token-dedup and value-graph
+// hash used by ExtractTokens (extract.go) and the VDG (vdg.go).
+func hash64(b []byte) uint64 {
+	h := uint64(1469598103934665603)
+	for _, c := range b {
+		h ^= uint64(c)
+		h *= 1099511628211
+	}
+	return h
+}

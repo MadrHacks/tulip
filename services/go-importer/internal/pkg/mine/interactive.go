@@ -115,27 +115,7 @@ func pendingPrompt(turns []db.Turn, i int) *string {
 	return &prompt
 }
 
-// maybeSynthInteractive attempts, at most once per cluster (guarded by
-// e.interactiveSynthed), to synthesize and persist an interactive session plan
-// for a detected candidate. It pulls one representative flag-leaking flow; if
-// its conversation has >= 2 client turns — a genuine multi-turn session a
-// single-flow template cannot express — it synthesizes the plan and upserts it.
-// Fewer than 2 client turns: nothing is written and it stays a single-flow
-// candidate.
-func (e *Engine) maybeSynthInteractive(ctx context.Context, service string, id int64, port int) {
-	key := fmt.Sprintf("%s:%d", service, id)
-	if e.interactiveSynthed[key] {
-		return
-	}
-	e.interactiveSynthed[key] = true
-
-	if plan := e.richestFlagFlowPlan(ctx, service, fmt.Sprintf("cluster:%s:%d", service, id), port); plan != nil {
-		saveInteractiveTemplate(ctx, e.db.Pool(), service, id, plan)
-	}
-}
-
-// maybeSynthInteractiveShape is the neutral shape-side twin of
-// maybeSynthInteractive: at most once per shape (guarded by
+// maybeSynthInteractiveShape attempts, at most once per shape (guarded by
 // e.shapeInteractiveSynthed), it pulls the richest flag-leaking flow tagged
 // shape:<svc>:<id> and, when that session is genuinely multi-turn, synthesizes
 // and persists its interactive plan to mine.shape_interactive. A shape carrying
@@ -157,9 +137,7 @@ func (e *Engine) maybeSynthInteractiveShape(ctx context.Context, service string,
 // client turns), and — only when that session is genuinely multi-turn (>= 2
 // client turns, which a single-flow template cannot express) — synthesizes its
 // interactive plan and returns the marshaled JSON. Returns nil when there is no
-// such flow, the fetch fails, or the session is single-turn. Shared by the
-// cluster and shape interactive paths, which differ only in the tag they select
-// and the table they persist to.
+// such flow, the fetch fails, or the session is single-turn.
 func (e *Engine) richestFlagFlowPlan(ctx context.Context, service, tag string, port int) []byte {
 	var flowID uuid.UUID
 	err := e.db.Pool().QueryRow(ctx,
@@ -192,19 +170,6 @@ func (e *Engine) richestFlagFlowPlan(ctx context.Context, service, tag string, p
 		return nil
 	}
 	return encoded
-}
-
-// saveInteractiveTemplate persists a synthesized plan, keeping the first one
-// written for a cluster (ON CONFLICT DO NOTHING).
-func saveInteractiveTemplate(ctx context.Context, pool *pgxpool.Pool, service string, id int64, plan []byte) {
-	_, err := pool.Exec(ctx, `
-		INSERT INTO mine.interactive_template (service, cluster_id, plan)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (service, cluster_id) DO NOTHING
-	`, service, id, plan)
-	if err != nil {
-		log.Println("minecore: save interactive template:", err)
-	}
 }
 
 // saveShapeInteractiveTemplate persists a synthesized plan for a shape, keeping

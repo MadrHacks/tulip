@@ -331,11 +331,6 @@ export function Header() {
             Graph
           </button>
         </Link>
-        <Link to={`/clusters?${searchParams}`} className="flex items-center">
-          <button className="btn-primary">
-            Clusters
-          </button>
-        </Link>
         <Link to={`/shapes?${searchParams}`} className="flex items-center">
           <button className="btn-primary">
             Shapes

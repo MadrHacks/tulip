@@ -6,9 +6,32 @@ import (
 	"hash/fnv"
 	"log"
 	"strconv"
+	"strings"
 
 	"go-importer/internal/pkg/db"
 )
+
+// flagIDSet returns the live flagId set as a lookup map, for slot typing during
+// shape replay-template synthesis.
+func (e *Engine) flagIDSet() map[string]bool {
+	m := make(map[string]bool, len(e.flagIDs))
+	for _, id := range e.flagIDs {
+		m[id] = true
+	}
+	return m
+}
+
+// primaryShapeTag returns the flow's first shape:<svc>:<id> tag — the single
+// shape identity the chain path keys each of its steps by — or "" when the flow
+// produced no shape tag.
+func primaryShapeTag(tags []string) string {
+	for _, t := range tags {
+		if strings.HasPrefix(t, "shape:") {
+			return t
+		}
+	}
+	return ""
+}
 
 // The parallel SHAPE path: the online counterpart of the cluster path in
 // handle(). For each flow it reads the ORDERED per-item messages, segments them

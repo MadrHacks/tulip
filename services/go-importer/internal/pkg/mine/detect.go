@@ -10,13 +10,17 @@ import (
 
 const detectInterval = 30 * time.Second
 
-// maybeDetect auto-flags exploit-candidate clusters. The rule is fully NAT-robust
-// — it uses no source IP: on a service where the scoreboard shows we are losing
-// flags (heat), any cluster whose flows leak a flag (flagOut) is a candidate
-// attack. Detection is deliberately liberal; the replicator's NOP-proof gate is
-// the precision filter, so a mis-flagged checker retrieve simply fails to capture
-// a flag at NOP and is never fanned out. Candidates are persisted for the
-// autonomous replicator to act on.
+// maybeDetect pursues exploit-candidate SHAPES. The rule is fully NAT-robust —
+// it uses no source IP: on a service where the scoreboard shows we are losing
+// flags (heat), every neutral shape carrying the flag_present SIGNAL is pursued
+// once for an interactive session plan. This is the SOURCE the autonomous
+// candidate reader consumes; it stays NEUTRAL — flag_present is a signal, and
+// the replicator's NOP-proof remains the sole arbiter of a real exploit. The
+// single-flow shape template is already persisted by the snapshot pass
+// (mine.shape.template_body), so nothing extra is written here for it.
+// Detection is deliberately liberal; the replicator's NOP-proof gate is the
+// precision filter, so a mis-flagged checker retrieve simply fails to capture a
+// flag at NOP and is never fanned out.
 func (e *Engine) maybeDetect(ctx context.Context) {
 	if !e.lastDetectAt.IsZero() && time.Since(e.lastDetectAt) < detectInterval {
 		return
@@ -28,28 +32,10 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 		return
 	}
 	e.warnOnServiceNameMismatch(lost)
-	for service, store := range e.shards {
+	for service := range lost {
 		if lost[service] <= 0 {
 			continue
 		}
-		for id, c := range store.clusters {
-			if c.flagOut > 0 {
-				saveAttackCandidate(ctx, e.db.Pool(), service, id, c.flagOut, c.n, c.firstSeen, c.port)
-				// A genuinely multi-turn candidate also gets an interactive session
-				// plan (once per cluster); single-turn ones stay single-flow.
-				e.maybeSynthInteractive(ctx, service, id, c.port)
-			}
-		}
-	}
-
-	// Parallel SHAPE-side detection (mirrors the cluster loop above). On a service
-	// we are losing flags on, every neutral shape carrying the flag_present SIGNAL
-	// is pursued once for an interactive session plan. This is the SOURCE the
-	// autonomous candidate reader now consumes; it stays NEUTRAL — flag_present is
-	// a signal, and the replicator's NOP-proof remains the sole arbiter of a real
-	// exploit. The single-flow shape template is already persisted by the snapshot
-	// pass (mine.shape.template_body), so nothing extra is written here for it.
-	for service := range lost {
 		for _, fs := range e.shapeStore.FlagShapes(service) {
 			e.maybeSynthInteractiveShape(ctx, service, int64(fs.ID), fs.Port)
 		}
@@ -57,17 +43,22 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 }
 
 // warnOnServiceNameMismatch fails loud at the boundary where the two service-name
-// sources meet: heat is keyed by the scoreboard's names, clusters by the
+// sources meet: heat is keyed by the scoreboard's names, shapes by the
 // services.yml names. If a service the scoreboard says we're losing has no
-// matching cluster shard, the config names don't line up with the scoreboard —
+// matching shape shard, the config names don't line up with the scoreboard —
 // which would otherwise silently detect nothing. We warn once rather than
 // tolerating the mismatch downstream.
 func (e *Engine) warnOnServiceNameMismatch(lost map[string]int) {
 	if e.warnedServiceMismatch {
 		return
 	}
+	configured := e.shapeStore.Services()
+	have := make(map[string]bool, len(configured))
+	for _, s := range configured {
+		have[s] = true
+	}
 	for svc := range lost {
-		if _, ok := e.shards[svc]; ok {
+		if have[svc] {
 			return // at least one lines up; config is consistent
 		}
 	}
@@ -75,10 +66,6 @@ func (e *Engine) warnOnServiceNameMismatch(lost map[string]int) {
 	scoreboard := make([]string, 0, len(lost))
 	for s := range lost {
 		scoreboard = append(scoreboard, s)
-	}
-	configured := make([]string, 0, len(e.shards))
-	for s := range e.shards {
-		configured = append(configured, s)
 	}
 	log.Printf("minecore: scoreboard service names %v matched no configured service %v even after "+
 		"fuzzy matching — set an explicit scoreboard_name in services.yml for the odd one out",
@@ -101,17 +88,4 @@ func loadHeatLoss(ctx context.Context, pool *pgxpool.Pool) map[string]int {
 		}
 	}
 	return out
-}
-
-// saveAttackCandidate upserts a detected candidate for the replicator to pick up.
-func saveAttackCandidate(ctx context.Context, pool *pgxpool.Pool, service string, id int64, flagOut, n int, firstSeen int64, port int) {
-	_, err := pool.Exec(ctx, `
-		INSERT INTO mine.attack_candidate (service, cluster_id, flag_out, n, first_seen, port)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (service, cluster_id) DO UPDATE SET
-			flag_out = excluded.flag_out, n = excluded.n, port = excluded.port, detected_at = now()
-	`, service, id, flagOut, n, firstSeen, port)
-	if err != nil {
-		log.Println("minecore: save candidate:", err)
-	}
 }

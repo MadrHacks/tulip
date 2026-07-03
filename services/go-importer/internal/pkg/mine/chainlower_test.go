@@ -59,15 +59,15 @@ func TestFindInjectSlot(t *testing.T) {
 	}
 }
 
-func TestParseClusterTag(t *testing.T) {
-	service, id, ok := parseClusterTag("cluster:CCalendar:7")
+func TestParseShapeTag(t *testing.T) {
+	service, id, ok := parseShapeTag("shape:CCalendar:7")
 	if !ok || service != "CCalendar" || id != 7 {
 		t.Fatalf("got (%q, %d, %v), want (CCalendar, 7, true)", service, id, ok)
 	}
-	if _, _, ok := parseClusterTag("role:checker"); ok {
-		t.Error("non-cluster tag should not parse")
+	if _, _, ok := parseShapeTag("cluster:svc:1"); ok {
+		t.Error("non-shape tag should not parse")
 	}
-	if _, _, ok := parseClusterTag("cluster:svc:notanint"); ok {
+	if _, _, ok := parseShapeTag("shape:svc:notanint"); ok {
 		t.Error("non-numeric id should not parse")
 	}
 }

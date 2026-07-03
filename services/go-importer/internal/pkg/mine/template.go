@@ -7,8 +7,14 @@ import (
 	"unicode/utf8"
 )
 
+// coreQuorum is the minimum number of member requests required to synthesize a
+// template: below it there is too little variation to tell a constant apart from
+// a variable slot, so synthesis is skipped. Used by synthesize() (below) and the
+// shape-side synthesizeShapeTemplate (shapesynth.go).
+const coreQuorum = 3
+
 // SlotType classifies a variable slot of a template by what its values are
-// across the cluster's members.
+// across a shape's members.
 type SlotType int
 
 const (
@@ -175,7 +181,7 @@ func countVarSegments(segs []Segment) int {
 	return n
 }
 
-// synthesize builds a typed template from a cluster's member requests (unmasked
+// synthesize builds a typed template from a shape's member requests (unmasked
 // canonical forms). Returns nil with fewer than coreQuorum members or no shape.
 func synthesize(members [][]byte, flagRe *regexp.Regexp, flagIDs map[string]bool) *Template {
 	if len(members) < coreQuorum {

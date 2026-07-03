@@ -11,15 +11,10 @@ import (
 )
 
 // Request normalization: reduce a flow's client-side bytes to the canonical
-// representation it clusters on. For HTTP this is method + path-template +
-// sorted query + stable headers + body; non-HTTP payloads pass through. Flag and
-// flagId values are masked to sentinels AFTER parsing (so they cannot perturb
-// Content-Length), collapsing otherwise-unique attack requests onto one shape.
-
-var (
-	flagSentinel = []byte("\x00F\x00")
-	fidSentinel  = []byte("\x00I\x00")
-)
+// representation used by template synthesis. For HTTP this is method + path-
+// template + sorted query + stable headers + body; non-HTTP payloads pass
+// through. buildFlagIDRegex compiles the live flagIds into the matcher the shape
+// interactive/slot-typing paths use.
 
 const minMaskLen = 4
 
@@ -31,31 +26,13 @@ var volatileHeaders = map[string]bool{
 	"Upgrade-Insecure-Requests": true,
 }
 
-// canonical returns the unmasked canonical request (HTTP structural form, or the
-// raw bytes for non-HTTP). Template synthesis diffs cluster members on this.
+// canonical returns the canonical request (HTTP structural form, or the raw
+// bytes for non-HTTP). Template synthesis diffs a shape's members on this.
 func canonical(clientData []byte) []byte {
 	if canon, ok := httpRequestCanon(clientData); ok {
 		return canon
 	}
 	return clientData
-}
-
-// Normalize returns the masked canonical request for clustering.
-func Normalize(clientData []byte, flagRe, fidRe *regexp.Regexp) []byte {
-	return maskValues(canonical(clientData), flagRe, fidRe)
-}
-
-// maskValues replaces flag and flagId occurrences with sentinels in a single
-// pass each. fidRe is a precompiled alternation of the live flagIds (built once
-// per refresh), so masking is O(payload), not O(payload * #flagIds).
-func maskValues(data []byte, flagRe, fidRe *regexp.Regexp) []byte {
-	if flagRe != nil {
-		data = flagRe.ReplaceAll(data, flagSentinel)
-	}
-	if fidRe != nil {
-		data = fidRe.ReplaceAll(data, fidSentinel)
-	}
-	return data
 }
 
 // buildFlagIDRegex compiles the live flagIds into one alternation matcher, with
