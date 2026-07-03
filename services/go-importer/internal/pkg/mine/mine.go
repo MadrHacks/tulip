@@ -32,6 +32,7 @@ type Engine struct {
 	shards        map[string]*clusterStore
 	calibrators   map[string]*Calibrator
 	serviceByPort map[int]string
+	resolver      *serviceResolver
 	flagRe        *regexp.Regexp
 	flagLifetime  int
 
@@ -69,6 +70,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		shards:        map[string]*clusterStore{},
 		calibrators:   map[string]*Calibrator{},
 		serviceByPort: config.ServiceByPort(),
+		resolver:      newServiceResolver(config.ServiceDefs()),
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
 		templatedAt:   map[string]int{},

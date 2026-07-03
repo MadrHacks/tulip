@@ -8,8 +8,10 @@ type Heat struct {
 	OurSLAOk    bool // our team's checks all pass on this service
 }
 
-// ServiceHeat aggregates the scoreboard into per-service-NAME heat for our team.
-func ServiceHeat(sb *Scoreboard, ourTeamID int) map[string]Heat {
+// ServiceHeat aggregates the scoreboard into per-service heat for our team. The
+// resolver maps each scoreboard service name to its internal (services.yml) name
+// so heat keys match the cluster shards; it is the single reconciliation point.
+func ServiceHeat(sb *Scoreboard, ourTeamID int, resolver *serviceResolver) map[string]Heat {
 	heat := map[string]Heat{}
 	if sb == nil {
 		return heat
@@ -23,7 +25,7 @@ func ServiceHeat(sb *Scoreboard, ourTeamID int) map[string]Heat {
 	for _, team := range sb.Scoreboard {
 		ours := team.TeamId == ourTeamID
 		for _, svc := range team.Services {
-			name := ServiceName(svc.Shortname)
+			name := resolver.resolve(ServiceName(svc.Shortname))
 			h := heat[name]
 			h.TotalStolen += svc.Stolen
 			if ours {

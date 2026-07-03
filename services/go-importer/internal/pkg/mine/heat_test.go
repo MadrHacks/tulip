@@ -30,7 +30,7 @@ func TestServiceHeat(t *testing.T) {
 		},
 	}
 
-	heat := ServiceHeat(sb, 1)
+	heat := ServiceHeat(sb, 1, newServiceResolver(nil))
 
 	cal, ok := heat["CCalendar"]
 	if !ok {
@@ -91,7 +91,7 @@ func TestServiceHeatSLAFailsIfAnyInstanceFails(t *testing.T) {
 			},
 		},
 	}
-	heat := ServiceHeat(sb, 1)
+	heat := ServiceHeat(sb, 1, newServiceResolver(nil))
 	if heat["CCalendar"].OurSLAOk {
 		t.Errorf("OurSLAOk = true, want false when one instance fails")
 	}
@@ -108,14 +108,14 @@ func TestServiceHeatSLANotOkWithoutChecks(t *testing.T) {
 			},
 		},
 	}
-	heat := ServiceHeat(sb, 1)
+	heat := ServiceHeat(sb, 1, newServiceResolver(nil))
 	if heat["CMail"].OurSLAOk {
 		t.Errorf("OurSLAOk = true, want false when there are no checks")
 	}
 }
 
 func TestServiceHeatNil(t *testing.T) {
-	if h := ServiceHeat(nil, 1); h == nil || len(h) != 0 {
+	if h := ServiceHeat(nil, 1, newServiceResolver(nil)); h == nil || len(h) != 0 {
 		t.Errorf("ServiceHeat(nil) = %v, want empty non-nil map", h)
 	}
 }

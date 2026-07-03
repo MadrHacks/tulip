@@ -124,6 +124,34 @@ func VulnboxIP() string { return getString(vulnboxFile, "ip", "") }
 
 // Services config
 
+// ServiceDef is one services.yml entry: the internal service name (derived from
+// the vulnbox folder) plus an optional explicit scoreboard name. When
+// ScoreboardName is empty the scoreboard name is reconciled by fuzzy match.
+type ServiceDef struct {
+	Name           string
+	ScoreboardName string
+}
+
+// ServiceDefs returns every configured service with its optional scoreboard_name
+// override, for the one place that reconciles config names with scoreboard names.
+func ServiceDefs() []ServiceDef {
+	var out []ServiceDef
+	list, _ := servicesFile.load()["services"].([]interface{})
+	for _, item := range list {
+		svc, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := svc["name"].(string)
+		if name == "" {
+			continue
+		}
+		sb, _ := svc["scoreboard_name"].(string)
+		out = append(out, ServiceDef{Name: name, ScoreboardName: sb})
+	}
+	return out
+}
+
 // ServiceByPort maps each service port to its logical service name, from
 // services.yml (ports grouped under a name), so analysis shards by service: a
 // service's multiple ports collapse to one name.

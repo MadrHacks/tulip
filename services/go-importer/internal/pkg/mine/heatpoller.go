@@ -69,7 +69,7 @@ func (e *Engine) pollHeatOnce(ctx context.Context) {
 	if sb == nil {
 		return
 	}
-	saveHeat(ctx, e.db.Pool(), ServiceHeat(sb, e.teamID))
+	saveHeat(ctx, e.db.Pool(), ServiceHeat(sb, e.teamID, e.resolver))
 }
 
 // saveHeat upserts the current per-service heat snapshot.

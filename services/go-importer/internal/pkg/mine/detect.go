@@ -64,8 +64,8 @@ func (e *Engine) warnOnServiceNameMismatch(lost map[string]int) {
 	for s := range e.shards {
 		configured = append(configured, s)
 	}
-	log.Printf("minecore: scoreboard service names %v do not match any configured service %v — "+
-		"align services.yml names exactly with the scoreboard (names are matched, not normalized)",
+	log.Printf("minecore: scoreboard service names %v matched no configured service %v even after "+
+		"fuzzy matching — set an explicit scoreboard_name in services.yml for the odd one out",
 		scoreboard, configured)
 }
 
