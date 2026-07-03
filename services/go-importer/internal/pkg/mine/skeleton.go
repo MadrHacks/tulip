@@ -45,6 +45,11 @@ var (
 	reReqLine = regexp.MustCompile(`^([A-Z]+) (\S+) HTTP/1\.[01]`)
 	reUA      = regexp.MustCompile(`(?im)^user-agent:[ \t]*(.*?)\r?$`)
 	reCThdr   = regexp.MustCompile(`(?im)^content-type:[ \t]*([^;\r\n]+)`)
+	// Structured value tokens in line-protocol args: a date or a wall-clock time
+	// (optionally with a ±zone) is always a per-instance value, so it masks — else
+	// every distinct timestamp freezes as its own shape.
+	reDateTok = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	reTimeTok = regexp.MustCompile(`^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?([+-][0-9]{2}:?[0-9]{2})?$`)
 )
 
 // charClassCount counts how many of {lower, upper, digit} appear in s. The
@@ -101,16 +106,26 @@ func isAllDigits(s string) bool {
 }
 
 // maskToken masks a single already-split token by the value rules (used for line
-// arguments): flag -> <FLAG>, all-digits(>=3) -> <NUM>, long mixed-class alnum
-// -> <TOK>, else literal.
+// arguments): flag -> <FLAG>, date/time -> <DATE>/<TIME>, all-digits(>=3) ->
+// <NUM>, mixed-class alnum(>=5) -> <TOK>, else literal. The >=5 length gate is
+// deliberately shorter than the path-segment gate (>=8): line args are values,
+// not endpoint words, so a shorter random token (a booking code, a session nonce)
+// should still collapse. The >=2 char-class gate still protects single-class enums
+// (airport codes "USA","CRM") and words ("checker") from masking.
 func maskToken(t string) string {
 	if flagShapeRe.MatchString(t) {
 		return "<FLAG>"
 	}
+	if reDateTok.MatchString(t) {
+		return "<DATE>"
+	}
+	if reTimeTok.MatchString(t) {
+		return "<TIME>"
+	}
 	if len(t) >= 3 && isAllDigits(t) {
 		return "<NUM>"
 	}
-	if len(t) >= 8 && isAlnumRun(t) && charClassCount(t) >= 2 {
+	if len(t) >= 5 && isAlnumRun(t) && charClassCount(t) >= 2 {
 		return "<TOK>"
 	}
 	return t
