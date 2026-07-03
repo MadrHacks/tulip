@@ -22,13 +22,13 @@ func TestAssignIdenticalAndDifferent(t *testing.T) {
 	cs := newClusterStore()
 
 	sig := feat("GET /login HTTP/1.1\r\nHost: x\r\n\r\n")
-	id1, new1 := cs.Assign(sig)
+	id1, new1 := cs.Assign(sig, 1000)
 	if !new1 {
 		t.Fatalf("first assign should create a new cluster")
 	}
 
 	// Re-assigning the exact same signature must reuse the cluster.
-	id2, new2 := cs.Assign(sig)
+	id2, new2 := cs.Assign(sig, 1000)
 	if new2 {
 		t.Fatalf("identical signature should not create a new cluster")
 	}
@@ -37,7 +37,7 @@ func TestAssignIdenticalAndDifferent(t *testing.T) {
 	}
 
 	other := feat("POST /api/v2/transfer?amount=999999&to=evil HTTP/1.1\r\nbody-very-different\r\n\r\n")
-	id3, new3 := cs.Assign(other)
+	id3, new3 := cs.Assign(other, 1000)
 	if !new3 {
 		t.Fatalf("clearly different signature should create a new cluster")
 	}
@@ -57,7 +57,7 @@ func TestNearVariantsCollapseToOneCluster(t *testing.T) {
 	newCount := 0
 	const N = 40
 	for i := 0; i < N; i++ {
-		id, isNew := cs.Assign(sig)
+		id, isNew := cs.Assign(sig, 1000)
 		if isNew {
 			newCount++
 			firstID = id
@@ -72,7 +72,7 @@ func TestNearVariantsCollapseToOneCluster(t *testing.T) {
 	// Near (but not identical) variants must not explode the cluster count:
 	// every signature is at least placed somewhere, and the store stays small.
 	for i := 2; i <= N; i++ {
-		cs.Assign(feat(fmt.Sprintf("GET /x?id=%d HTTP/1.1\r\nHost: target\r\n\r\n", i)))
+		cs.Assign(feat(fmt.Sprintf("GET /x?id=%d HTTP/1.1\r\nHost: target\r\n\r\n", i)), 1000)
 	}
 	if len(cs.clusters) == 0 {
 		t.Fatalf("no clusters created")
@@ -87,14 +87,14 @@ func TestFrozenCoreSetOnceAndStable(t *testing.T) {
 
 	var id int64
 	for i := 0; i < coreQuorum-1; i++ {
-		id, _ = cs.Assign(sig)
+		id, _ = cs.Assign(sig, 1000)
 	}
 	if set, _ := cs.coreInfo(id); set {
 		t.Fatalf("core should not be set before quorum (%d members)", coreQuorum-1)
 	}
 
 	// The member that reaches the quorum freezes the core.
-	id, _ = cs.Assign(sig)
+	id, _ = cs.Assign(sig, 1000)
 	set, core := cs.coreInfo(id)
 	if !set {
 		t.Fatalf("core should be set at quorum (%d members)", coreQuorum)
@@ -102,7 +102,7 @@ func TestFrozenCoreSetOnceAndStable(t *testing.T) {
 
 	// Many more assigns of the same and of near sigs must not change the core.
 	for i := 0; i < 50; i++ {
-		cs.Assign(sig)
+		cs.Assign(sig, 1000)
 	}
 	set2, core2 := cs.coreInfo(id)
 	if !set2 {
@@ -119,7 +119,7 @@ func TestReservoirBounded(t *testing.T) {
 	// Mix of identical and varied inputs; the invariant must hold for EVERY
 	// cluster regardless of how assignment splits them.
 	for i := 0; i < reservoirCap*5; i++ {
-		cs.Assign(feat(fmt.Sprintf("GET /res?id=%d HTTP/1.1\r\nHost: target\r\n\r\n", i)))
+		cs.Assign(feat(fmt.Sprintf("GET /res?id=%d HTTP/1.1\r\nHost: target\r\n\r\n", i)), 1000)
 	}
 	for id, c := range cs.clusters {
 		if got := len(c.reservoir); got > reservoirCap {
@@ -135,7 +135,7 @@ func TestReservoirBounded(t *testing.T) {
 	sig := feat("GET /same HTTP/1.1\r\nHost: target\r\n\r\n")
 	var id int64
 	for i := 0; i < reservoirCap*5; i++ {
-		id, _ = cs2.Assign(sig)
+		id, _ = cs2.Assign(sig, 1000)
 	}
 	if got := len(cs2.clusters[id].reservoir); got > reservoirCap {
 		t.Fatalf("single-cluster reservoir exceeded cap: %d > %d", got, reservoirCap)
@@ -154,7 +154,7 @@ func TestRepStaysIndexedAfterDrift(t *testing.T) {
 	const K = 30
 	var id int64
 	for i := 0; i < K; i++ {
-		id, _ = cs.Assign(sig)
+		id, _ = cs.Assign(sig, 1000)
 	}
 
 	// The current rep must still be discoverable via the LSH (kept in sync
@@ -166,8 +166,66 @@ func TestRepStaysIndexedAfterDrift(t *testing.T) {
 	}
 
 	// A fresh identical sig must route to the same cluster, not spawn a new one.
-	gotID, isNew := cs.Assign(sig)
+	gotID, isNew := cs.Assign(sig, 1000)
 	if isNew || gotID != id {
 		t.Fatalf("identical sig routed to cluster %d (new=%v), expected %d", gotID, isNew, id)
+	}
+}
+
+// distinctSig builds a MinHash that shares no positions with any other seed, so
+// each mints its own cluster (Jaccard ~0), letting eviction be tested in isolation.
+func distinctSig(seed uint64) MinHash {
+	var m MinHash
+	for i := range m {
+		m[i] = seed*1000003 + uint64(i)
+	}
+	return m
+}
+
+func TestClusterEvictStale(t *testing.T) {
+	cs := newClusterStore()
+	id1, _ := cs.Assign(distinctSig(1), 100)
+	id2, _ := cs.Assign(distinctSig(2), 200)
+	if len(cs.clusters) != 2 {
+		t.Fatalf("expected 2 clusters, got %d", len(cs.clusters))
+	}
+
+	gone := cs.evictStale(150)
+	if len(gone) != 1 || gone[0] != id1 {
+		t.Fatalf("expected id1 (%d) evicted, got %v", id1, gone)
+	}
+	if _, ok := cs.clusters[id1]; ok {
+		t.Error("evicted cluster should be gone from the map")
+	}
+	if _, ok := cs.clusters[id2]; !ok {
+		t.Error("in-window cluster should remain")
+	}
+	// The evicted rep is out of the LSH, so its shape re-mints a new cluster.
+	if _, isNew := cs.Assign(distinctSig(1), 300); !isNew {
+		t.Error("re-assigning an evicted shape should create a new cluster")
+	}
+}
+
+func TestClusterEvictToCap(t *testing.T) {
+	cs := newClusterStore()
+	for i := 0; i < 10; i++ {
+		cs.Assign(distinctSig(uint64(i)), int64(100+i))
+	}
+	if len(cs.clusters) != 10 {
+		t.Fatalf("expected 10 clusters, got %d", len(cs.clusters))
+	}
+
+	gone := cs.evictToCap(4)
+	if len(gone) != 6 || len(cs.clusters) != 4 {
+		t.Fatalf("cap 4: %d survive, %d evicted", len(cs.clusters), len(gone))
+	}
+	// The survivors are the most-recently-seen (largest lastSeen).
+	for _, c := range cs.clusters {
+		if c.lastSeen < 106 {
+			t.Errorf("cap should keep newest; survivor lastSeen=%d", c.lastSeen)
+		}
+	}
+	if cs.evictToCap(4) != nil {
+		t.Error("evicting to a cap already met should be a no-op")
 	}
 }

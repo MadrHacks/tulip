@@ -22,8 +22,11 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			core bytea NOT NULL,
 			core_set boolean NOT NULL,
 			n integer NOT NULL,
+			last_seen bigint NOT NULL DEFAULT 0,
 			PRIMARY KEY (service, id)
 		);
+		ALTER TABLE mine.cluster ADD COLUMN IF NOT EXISTS last_seen bigint NOT NULL DEFAULT 0;
+		UPDATE mine.cluster SET last_seen = extract(epoch from now())::bigint WHERE last_seen = 0;
 		CREATE TABLE IF NOT EXISTS mine.template (
 			service text NOT NULL,
 			cluster_id bigint NOT NULL,

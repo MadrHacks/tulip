@@ -1,5 +1,7 @@
 package mine
 
+import "sort"
+
 const (
 	tMerge       = 0.82 // min Jaccard to join an existing cluster
 	reservoirCap = 64   // bounded sample per cluster for medoid
@@ -14,6 +16,7 @@ type cluster struct {
 	coreSet   bool      // whether core has been frozen
 	reservoir []MinHash // bounded sample (<= reservoirCap)
 	n         int       // total members ever assigned
+	lastSeen  int64     // newest member's flow time (unix sec), for eviction
 }
 
 // clusterStore keeps leader clusters indexed by an LSH over their current reps.
@@ -31,9 +34,10 @@ func newClusterStore() *clusterStore {
 }
 
 // Assign places sig into the best-matching existing cluster (Jaccard >= tMerge
-// against either its rep or its frozen core), or creates a new one. It returns
-// the cluster id and whether the cluster was newly created.
-func (cs *clusterStore) Assign(sig MinHash) (id int64, isNew bool) {
+// against either its rep or its frozen core), or creates a new one. t is the
+// flow's time, recorded for eviction. Returns the cluster id and whether the
+// cluster was newly created.
+func (cs *clusterStore) Assign(sig MinHash, t int64) (id int64, isNew bool) {
 	bestID := int64(-1)
 	bestJ := 0.0
 	for cid := range cs.lsh.candidates(sig) {
@@ -54,12 +58,12 @@ func (cs *clusterStore) Assign(sig MinHash) (id int64, isNew bool) {
 	}
 
 	if bestID >= 0 {
-		cs.addMember(cs.clusters[bestID], sig)
+		cs.addMember(cs.clusters[bestID], sig, t)
 		return bestID, false
 	}
 
 	cs.seq++
-	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1}
+	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1, lastSeen: t}
 	cs.clusters[cs.seq] = c
 	cs.lsh.add(sig, cs.seq)
 	return cs.seq, true
@@ -67,8 +71,11 @@ func (cs *clusterStore) Assign(sig MinHash) (id int64, isNew bool) {
 
 // addMember folds sig into c, updates the bounded reservoir and medoid rep, and
 // freezes the identity core once the quorum is reached.
-func (cs *clusterStore) addMember(c *cluster, sig MinHash) {
+func (cs *clusterStore) addMember(c *cluster, sig MinHash, t int64) {
 	c.n++
+	if t > c.lastSeen {
+		c.lastSeen = t
+	}
 
 	full := len(c.reservoir) >= reservoirCap
 	if full {
@@ -94,6 +101,43 @@ func (cs *clusterStore) addMember(c *cluster, sig MinHash) {
 		cs.lsh.remove(oldRep, c.id)
 		cs.lsh.add(c.rep, c.id)
 	}
+}
+
+// evictStale removes clusters whose newest member is older than before, freeing
+// their memory and LSH entries. Returns the evicted ids so the engine can drop
+// their persisted rows and template state. Flows older than the horizon are not
+// even read, so their clusters can leave RAM without losing live matches.
+func (cs *clusterStore) evictStale(before int64) []int64 {
+	var gone []int64
+	for id, c := range cs.clusters {
+		if c.lastSeen < before {
+			cs.lsh.remove(c.rep, id)
+			delete(cs.clusters, id)
+			gone = append(gone, id)
+		}
+	}
+	return gone
+}
+
+// evictToCap enforces a hard per-shard cap, removing the least-recently-seen
+// clusters until at most max remain. A cap <= 0 is unbounded. Returns evicted ids.
+func (cs *clusterStore) evictToCap(max int) []int64 {
+	if max <= 0 || len(cs.clusters) <= max {
+		return nil
+	}
+	ids := make([]int64, 0, len(cs.clusters))
+	for id := range cs.clusters {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return cs.clusters[ids[i]].lastSeen < cs.clusters[ids[j]].lastSeen
+	})
+	gone := ids[:len(cs.clusters)-max]
+	for _, id := range gone {
+		cs.lsh.remove(cs.clusters[id].rep, id)
+		delete(cs.clusters, id)
+	}
+	return gone
 }
 
 // medoid returns the element of sigs minimizing the summed distance (1 - Jaccard)
@@ -123,27 +167,33 @@ func medoid(sigs []MinHash) MinHash {
 // flows after a restart). The reservoir sample is not persisted; it re-seeds
 // from rep on restore.
 type clusterSnapshot struct {
-	id      int64
-	rep     MinHash
-	core    MinHash
-	coreSet bool
-	n       int
+	id       int64
+	rep      MinHash
+	core     MinHash
+	coreSet  bool
+	n        int
+	lastSeen int64
 }
 
 func (cs *clusterStore) snapshot() []clusterSnapshot {
 	out := make([]clusterSnapshot, 0, len(cs.clusters))
 	for _, c := range cs.clusters {
-		out = append(out, clusterSnapshot{c.id, c.rep, c.core, c.coreSet, c.n})
+		out = append(out, clusterSnapshot{c.id, c.rep, c.core, c.coreSet, c.n, c.lastSeen})
 	}
 	return out
 }
 
-func restoreClusterStore(snaps []clusterSnapshot) *clusterStore {
+// restoreClusterStore rebuilds a shard, skipping clusters last seen before floor
+// so a restart after downtime does not reload long-dead clusters into RAM.
+func restoreClusterStore(snaps []clusterSnapshot, floor int64) *clusterStore {
 	cs := newClusterStore()
 	for _, s := range snaps {
+		if s.lastSeen < floor {
+			continue
+		}
 		cs.clusters[s.id] = &cluster{
 			id: s.id, rep: s.rep, core: s.core, coreSet: s.coreSet,
-			reservoir: []MinHash{s.rep}, n: s.n,
+			reservoir: []MinHash{s.rep}, n: s.n, lastSeen: s.lastSeen,
 		}
 		cs.lsh.add(s.rep, s.id)
 		if s.id > cs.seq {

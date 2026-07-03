@@ -43,6 +43,8 @@ type Engine struct {
 	lastSynthAt     time.Time
 	lastPropagateAt time.Time
 
+	dataClock int64 // newest flow time seen (unix sec), drives eviction
+
 	chains           map[string]*chainAnalyzer // per service
 	chainClusters    *chainClusterStore        // shared id allocator
 	chainWindow      int64
@@ -148,18 +150,24 @@ func (e *Engine) handle(f *Flow) {
 	canon := Normalize(client, e.flagRe, e.flagIDs)
 	sig, _ := Featurize(canon)
 
+	t := f.Time.Unix()
+	if t > e.dataClock {
+		e.dataClock = t
+	}
+
 	service := e.serviceName(f.DstPort)
 	store := e.shards[service]
 	if store == nil {
 		store = newClusterStore()
 		e.shards[service] = store
 	}
-	id, _ := store.Assign(sig)
+	id, _ := store.Assign(sig, t)
 
-	tag := fmt.Sprintf("cluster:%s:%d", service, id)
-	e.db.FlowAddTags(f.Id, []string{tag})
-	e.tagRole(f, service)
-	e.observeChain(f, service, tag, client, server)
+	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
+	e.db.FlowAddTags(f.Id, []string{clusterTag, e.roleTag(f, service)})
+	if !e.cfg.ChainDisable {
+		e.observeChain(f, service, clusterTag, client, server)
+	}
 }
 
 // chainShard returns the per-service chain analyzer, creating it on first use.
@@ -187,6 +195,9 @@ func (e *Engine) observeChain(f *Flow, service, clusterTag string, clientData, s
 // maybeChainSynthesize emits settled multi-step sessions across every service
 // shard: it persists each chain template and tags its member flows.
 func (e *Engine) maybeChainSynthesize(ctx context.Context) {
+	if e.cfg.ChainDisable {
+		return
+	}
 	if !e.lastChainSynthAt.IsZero() && time.Since(e.lastChainSynthAt) < chainSynthInterval {
 		return
 	}
@@ -233,8 +244,11 @@ func (e *Engine) refreshFlagIDs() {
 }
 
 func (e *Engine) loadShards(ctx context.Context) {
+	// Skip clusters last seen before the horizon: a restart after downtime must
+	// not reload long-dead clusters into RAM.
+	floor := time.Now().Unix() - int64(e.cfg.Horizon.Seconds())
 	for service, snaps := range loadClusterSnapshots(ctx, e.db.Pool()) {
-		e.shards[service] = restoreClusterStore(snaps)
+		e.shards[service] = restoreClusterStore(snaps, floor)
 	}
 	for service, snaps := range loadCalibratorSnapshots(ctx, e.db.Pool()) {
 		e.calibrators[service] = restoreCalibrator(snaps)
@@ -246,6 +260,7 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 	if !e.lastSnapshotAt.IsZero() && time.Since(e.lastSnapshotAt) < snapshotInterval {
 		return
 	}
+	e.evictClusters(ctx)
 	for service, store := range e.shards {
 		saveClusterSnapshots(ctx, e.db.Pool(), service, store.snapshot())
 	}
@@ -253,4 +268,22 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 		saveCalibratorSnapshots(ctx, e.db.Pool(), service, calib.snapshot())
 	}
 	e.lastSnapshotAt = time.Now()
+}
+
+// evictClusters bounds each service shard: it drops clusters not seen within the
+// horizon (their flows are past the read window) and enforces the hard cap by
+// least-recently-seen, deleting the evicted rows and their template bookkeeping.
+func (e *Engine) evictClusters(ctx context.Context) {
+	before := e.dataClock - int64(e.cfg.Horizon.Seconds())
+	for service, store := range e.shards {
+		gone := store.evictStale(before)
+		gone = append(gone, store.evictToCap(e.cfg.MaxClusters)...)
+		if len(gone) == 0 {
+			continue
+		}
+		deleteClusters(ctx, e.db.Pool(), service, gone)
+		for _, id := range gone {
+			delete(e.templatedAt, fmt.Sprintf("%s:%d", service, id))
+		}
+	}
 }
