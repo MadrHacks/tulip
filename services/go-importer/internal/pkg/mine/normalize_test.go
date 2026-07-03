@@ -11,8 +11,8 @@ func TestNormalizeCollapsesAttackVariants(t *testing.T) {
 	flagIDs := []string{"deadbeefcafe1234"}
 	a := []byte("GET /api/note/42?token=deadbeefcafe1234 HTTP/1.1\r\nHost: a\r\nDate: Mon\r\nX-Exploit: 1\r\n\r\n")
 	b := []byte("GET /api/note/99?token=deadbeefcafe1234 HTTP/1.1\r\nHost: b\r\nDate: Tue\r\nX-Exploit: 1\r\n\r\n")
-	ca := Normalize(a, flagRe, flagIDs)
-	cb := Normalize(b, flagRe, flagIDs)
+	ca := Normalize(a, flagRe, buildFlagIDRegex(flagIDs))
+	cb := Normalize(b, flagRe, buildFlagIDRegex(flagIDs))
 	if !bytes.Equal(ca, cb) {
 		t.Errorf("variants should canon-equal:\n a=%q\n b=%q", ca, cb)
 	}

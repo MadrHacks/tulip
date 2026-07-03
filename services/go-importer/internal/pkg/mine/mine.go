@@ -36,6 +36,7 @@ type Engine struct {
 	flagLifetime  int
 
 	flagIDs        []string
+	fidRe          *regexp.Regexp // precompiled flagId matcher, rebuilt on refresh
 	flagIDsAt      time.Time
 	lastSnapshotAt time.Time
 
@@ -149,11 +150,13 @@ func (e *Engine) handle(f *Flow) {
 		return
 	}
 
-	canon := Normalize(client, e.flagRe, e.flagIDs)
+	// Truncate the canonical form before masking so both stay cheap on large
+	// bodies: 8 KB captures a request's shape, and masking then runs over that.
+	canon := canonical(client)
 	if len(canon) > maxFeatureBytes {
 		canon = canon[:maxFeatureBytes]
 	}
-	sig, _ := Featurize(canon)
+	sig, _ := Featurize(maskValues(canon, e.flagRe, e.fidRe))
 
 	t := f.Time.Unix()
 	if t > e.dataClock {
@@ -251,6 +254,7 @@ func (e *Engine) refreshFlagIDs() {
 		contents = append(contents, x.Content)
 	}
 	e.flagIDs = contents
+	e.fidRe = buildFlagIDRegex(contents)
 	e.flagIDsAt = time.Now()
 }
 

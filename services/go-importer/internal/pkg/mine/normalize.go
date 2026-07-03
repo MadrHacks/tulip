@@ -41,20 +41,42 @@ func canonical(clientData []byte) []byte {
 }
 
 // Normalize returns the masked canonical request for clustering.
-func Normalize(clientData []byte, flagRe *regexp.Regexp, flagIDs []string) []byte {
-	return maskValues(canonical(clientData), flagRe, flagIDs)
+func Normalize(clientData []byte, flagRe, fidRe *regexp.Regexp) []byte {
+	return maskValues(canonical(clientData), flagRe, fidRe)
 }
 
-func maskValues(data []byte, flagRe *regexp.Regexp, flagIDs []string) []byte {
+// maskValues replaces flag and flagId occurrences with sentinels in a single
+// pass each. fidRe is a precompiled alternation of the live flagIds (built once
+// per refresh), so masking is O(payload), not O(payload * #flagIds).
+func maskValues(data []byte, flagRe, fidRe *regexp.Regexp) []byte {
 	if flagRe != nil {
 		data = flagRe.ReplaceAll(data, flagSentinel)
 	}
-	for _, id := range flagIDs {
-		if len(id) >= minMaskLen {
-			data = bytes.ReplaceAll(data, []byte(id), fidSentinel)
-		}
+	if fidRe != nil {
+		data = fidRe.ReplaceAll(data, fidSentinel)
 	}
 	return data
+}
+
+// buildFlagIDRegex compiles the live flagIds into one alternation matcher, with
+// longer ids first so an id containing another is masked whole. Returns nil when
+// there is nothing maskable.
+func buildFlagIDRegex(flagIDs []string) *regexp.Regexp {
+	parts := make([]string, 0, len(flagIDs))
+	for _, id := range flagIDs {
+		if len(id) >= minMaskLen {
+			parts = append(parts, regexp.QuoteMeta(id))
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	sort.Slice(parts, func(i, j int) bool { return len(parts[i]) > len(parts[j]) })
+	re, err := regexp.Compile(strings.Join(parts, "|"))
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 func httpRequestCanon(data []byte) ([]byte, bool) {
