@@ -12,9 +12,11 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_USER: tulip
       POSTGRES_DB: tulip
-    # This does not need to be adjusted, unless you actually want to limit it
-    # Postgres uses shared memory for caching, and docker assigns just 64 MB by default
-    shm_size: '128g'
+    # Postgres uses /dev/shm for parallel workers; docker's 64 MB default is too
+    # small. A laptop-safe default that's still ample for this workload; override
+    # TIMESCALE_SHM_SIZE for a bigger box (the old value was 128g, an OOM risk on
+    # a laptop).
+    shm_size: ${TIMESCALE_SHM_SIZE:-1g}
 
   frontend:
     build:
@@ -125,6 +127,10 @@ services:
       target: minecore
     image: tulip-minecore:latest
     restart: unless-stopped
+    # Bounded by exploit shapes, not traffic volume (cluster eviction + caps),
+    # so a modest limit contains any regression instead of the whole laptop.
+    mem_limit: ${MINECORE_MEM_LIMIT:-768m}
+    cpus: ${MINECORE_CPUS:-1.0}
     depends_on:
       - timescale
     environment:
@@ -135,6 +141,8 @@ services:
       context: services/replicator
     image: tulip-replicator:latest
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.5"
     depends_on:
       - timescale
     volumes:
@@ -149,6 +157,8 @@ services:
       context: services/patch-engine
     image: tulip-patch-engine:latest
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.5"
     environment:
       PATCH_ENGINE_ARMED: "false"
       FIREGEX_URL: ${FIREGEX_URL:-http://localhost:4444}
