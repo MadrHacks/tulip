@@ -30,6 +30,7 @@ type Engine struct {
 	cfg Config
 
 	shards        map[string]*clusterStore
+	shapeStore    *ShapeStore // parallel neutral request-shape path (runs alongside shards)
 	calibrators   map[string]*Calibrator
 	serviceByPort map[int]string
 	resolver      *serviceResolver
@@ -69,6 +70,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		db:                 database,
 		cfg:                cfg,
 		shards:             map[string]*clusterStore{},
+		shapeStore:         NewShapeStore(cfg.MaxShapes),
 		calibrators:        map[string]*Calibrator{},
 		serviceByPort:      config.ServiceByPort(),
 		resolver:           newServiceResolver(config.ServiceDefs()),
@@ -188,6 +190,10 @@ func (e *Engine) handle(f *Flow) {
 	if sugg := e.verdicts[clusterTag]; sugg != "" {
 		tags = append(tags, sugg)
 	}
+	// Parallel shape path: fold the flow's ordered messages into the neutral
+	// shape store and add its shape:/session: tags to the SAME write. This runs
+	// alongside — never in place of — the cluster tagging above.
+	tags = append(tags, e.shapeTags(f, service, t)...)
 	e.db.FlowAddTags(f.Id, tags)
 	if !e.cfg.ChainDisable {
 		e.observeChain(f, service, clusterTag, client, server)
@@ -278,6 +284,9 @@ func (e *Engine) loadShards(ctx context.Context) {
 	for service, snaps := range loadCalibratorSnapshots(ctx, e.db.Pool()) {
 		e.calibrators[service] = restoreCalibrator(snaps)
 	}
+	// Restore the parallel shape store from mine.shape: rebuilding each shard's
+	// Drain from the persisted templates keeps shape ids stable across a restart.
+	e.shapeStore = restoreShapeStore(loadShapeSnapshots(ctx, e.db.Pool()), e.cfg.MaxShapes)
 	e.lastSnapshotAt = time.Now()
 }
 
@@ -296,6 +305,7 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 		}
 		saveCalibratorSnapshots(ctx, e.db.Pool(), service, calib.snapshot())
 	}
+	e.snapshotShapes(ctx)
 	e.lastSnapshotAt = time.Now()
 }
 

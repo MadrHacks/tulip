@@ -27,6 +27,11 @@ type Config struct {
 	// (opaque or highly variable traffic) cannot grow memory without bound.
 	MaxClusters int
 
+	// MaxShapes is the hard per-service shape cap for the parallel shape path:
+	// the least-recently-seen shapes are evicted past it (EvictToCap), mirroring
+	// MaxClusters for the neutral request-shape store.
+	MaxShapes int
+
 	// MergeThreshold is the minimum Jaccard for a flow to join an existing
 	// cluster. Lower = looser (fewer, broader clusters); higher = tighter. A
 	// chatty JSON API and a rigid binary protocol want different values.
@@ -46,6 +51,7 @@ func ConfigFromEnv() Config {
 		ChainDFMax:     envInt("MINECORE_CHAIN_DF_MAX", 8),
 		ChainMaxSize:   envInt("MINECORE_CHAIN_MAX_SIZE", 16),
 		MaxClusters:    envInt("MINECORE_MAX_CLUSTERS", 4000),
+		MaxShapes:      envInt("MINECORE_MAX_SHAPES", 2000),
 		ChainDisable:   envBool("MINECORE_CHAIN_DISABLE", false),
 		MergeThreshold: envFloat("MINECORE_MERGE_THRESHOLD", defaultMergeThreshold),
 	}

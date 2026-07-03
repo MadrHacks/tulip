@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"regexp"
 	"strconv"
+
+	"go-importer/internal/pkg/db"
 )
 
 // Request-unit shape pipeline — stage 1: split ONE flow into REQUEST UNITS.
@@ -96,6 +98,92 @@ func SegmentFlow(id, svc string, port int, flagOut, flagIn bool, client, server 
 		fl.Units = append(fl.Units, RequestUnit{Svc: svc, Proto: "http", Index: i, Client: rq, Response: resp})
 	}
 	return fl
+}
+
+// msgTurn is one side's contiguous bytes: a merged run of consecutive
+// same-direction ordered messages. A flow's turns alternate client/server in
+// arrival order.
+type msgTurn struct {
+	fromClient bool
+	data       []byte
+}
+
+// mergeTurns collapses consecutive same-direction messages into alternating
+// turns, so the per-item message stream becomes the ordered back-and-forth of
+// the real conversation. Each turn owns a fresh copy of its bytes.
+func mergeTurns(msgs []db.FlowMessage) []msgTurn {
+	var turns []msgTurn
+	for _, m := range msgs {
+		if n := len(turns); n > 0 && turns[n-1].fromClient == m.FromClient {
+			turns[n-1].data = append(turns[n-1].data, m.Data...)
+		} else {
+			turns = append(turns, msgTurn{fromClient: m.FromClient, data: append([]byte(nil), m.Data...)})
+		}
+	}
+	return turns
+}
+
+// SegmentMessages cuts a flow's ORDERED, direction-tagged messages into request
+// units, pairing each request/op with the response that ACTUALLY followed it in
+// the real conversation. This is the true-alternation counterpart of
+// SegmentFlow: where SegmentFlow pairs two concatenated streams by global index
+// (and so cannot localize a line-protocol op's response — skypedia:1337 units
+// there carry a nil response), SegmentMessages walks the client/server turns, so
+// each client turn's units pair with the immediately following server turn.
+//
+// It reuses SegmentFlow's per-turn splitting: HTTP length-aware request/response
+// units paired by order within the turn boundary, or opcode-anchored line units.
+// Protocol is inferred from the first client turn (an HTTP request line => http,
+// otherwise the skypedia line/menu protocol). A line turn holding exactly one op
+// pairs cleanly with the following server turn; a turn that pipelines several ops
+// cannot localize a per-op response, so those units keep a nil response.
+func SegmentMessages(msgs []db.FlowMessage) []RequestUnit {
+	turns := mergeTurns(msgs)
+	proto := "line"
+	for _, tn := range turns {
+		if !tn.fromClient {
+			continue
+		}
+		if reReqLine.Match(tn.data) {
+			proto = "http"
+		}
+		break
+	}
+
+	var units []RequestUnit
+	idx := 0
+	for i := 0; i < len(turns); i++ {
+		if !turns[i].fromClient {
+			continue
+		}
+		var server []byte
+		if i+1 < len(turns) && !turns[i+1].fromClient {
+			server = turns[i+1].data
+		}
+		if proto == "line" {
+			ops := splitLineOps(turns[i].data)
+			for _, ob := range ops {
+				var resp []byte
+				if len(ops) == 1 {
+					resp = server // one op per turn pairs unambiguously with its response
+				}
+				units = append(units, RequestUnit{Proto: "line", Index: idx, Client: ob, Response: resp})
+				idx++
+			}
+			continue
+		}
+		reqs := splitHTTPRequests(turns[i].data)
+		resps := splitHTTPResponses(server)
+		for k, rq := range reqs {
+			var resp []byte
+			if k < len(resps) {
+				resp = resps[k]
+			}
+			units = append(units, RequestUnit{Proto: "http", Index: idx, Client: rq, Response: resp})
+			idx++
+		}
+	}
+	return units
 }
 
 // splitHTTPRequests cuts a client stream into request units by header+body

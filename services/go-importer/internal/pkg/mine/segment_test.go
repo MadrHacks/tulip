@@ -1,8 +1,11 @@
 package mine
 
 import (
+	"bytes"
 	"encoding/base64"
 	"testing"
+
+	"go-importer/internal/pkg/db"
 )
 
 // Real preserved-dataset samples (base64 of the decoded client/server bytes),
@@ -102,6 +105,70 @@ func TestSegmentContentLengthConsumesExactBody(t *testing.T) {
 	}
 	if got := string(units[1]); got != "POST /b HTTP/1.1\r\nContent-Length: 0\r\n\r\n" {
 		t.Errorf("unit1 = %q", got)
+	}
+}
+
+// TestSegmentMessagesHTTPPairsFollowingResponse: on an ordered keep-alive
+// conversation (C1 S1 C2 S2), each request pairs with the response that ACTUALLY
+// followed it — GET /a with the 200, GET /b with the 404 — proving the true
+// alternation, not a by-global-index guess.
+func TestSegmentMessagesHTTPPairsFollowingResponse(t *testing.T) {
+	msgs := []db.FlowMessage{
+		{FromClient: true, Data: []byte("GET /a HTTP/1.1\r\nHost: t\r\n\r\n")},
+		{FromClient: false, Data: []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nAA")},
+		{FromClient: true, Data: []byte("GET /b HTTP/1.1\r\nHost: t\r\n\r\n")},
+		{FromClient: false, Data: []byte("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nBBB")},
+	}
+	units := SegmentMessages(msgs)
+	if len(units) != 2 {
+		t.Fatalf("units = %d, want 2", len(units))
+	}
+	if units[0].Proto != "http" {
+		t.Fatalf("proto = %q, want http", units[0].Proto)
+	}
+	if !bytes.HasPrefix(units[0].Client, []byte("GET /a")) {
+		t.Errorf("unit0 client = %q, want GET /a", units[0].Client)
+	}
+	if !bytes.Contains(units[0].Response, []byte("200 OK")) {
+		t.Errorf("unit0 response = %q, want the 200 that followed GET /a", units[0].Response)
+	}
+	if !bytes.HasPrefix(units[1].Client, []byte("GET /b")) {
+		t.Errorf("unit1 client = %q, want GET /b", units[1].Client)
+	}
+	if !bytes.Contains(units[1].Response, []byte("404 Not Found")) {
+		t.Errorf("unit1 response = %q, want the 404 that followed GET /b", units[1].Response)
+	}
+}
+
+// TestSegmentMessagesLinePairsPerOpResponse: on an interactive 1337 op sequence
+// (C op1, S resp1, C op2, S resp2), each op pairs with its own response — the
+// per-op pairing the concatenated-stream SegmentFlow could not recover (it
+// leaves line responses nil).
+func TestSegmentMessagesLinePairsPerOpResponse(t *testing.T) {
+	msgs := []db.FlowMessage{
+		{FromClient: true, Data: []byte("1\nWTAAvJpFPTbRQH\n")},
+		{FromClient: false, Data: []byte("ok: created id 7\n")},
+		{FromClient: true, Data: []byte("2\n7\n")},
+		{FromClient: false, Data: []byte("value: hello\n")},
+	}
+	units := SegmentMessages(msgs)
+	if len(units) != 2 {
+		t.Fatalf("units = %d, want 2", len(units))
+	}
+	if units[0].Proto != "line" {
+		t.Fatalf("proto = %q, want line", units[0].Proto)
+	}
+	if got := firstLine(units[0].Client); got != "1" {
+		t.Errorf("unit0 opcode = %q, want 1", got)
+	}
+	if string(units[0].Response) != "ok: created id 7\n" {
+		t.Errorf("unit0 response = %q, want the reply that followed op 1", units[0].Response)
+	}
+	if got := firstLine(units[1].Client); got != "2" {
+		t.Errorf("unit1 opcode = %q, want 2", got)
+	}
+	if string(units[1].Response) != "value: hello\n" {
+		t.Errorf("unit1 response = %q, want the reply that followed op 2", units[1].Response)
 	}
 }
 
