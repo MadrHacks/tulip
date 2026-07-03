@@ -79,6 +79,19 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			gap_count integer NOT NULL,
 			PRIMARY KEY (service, source)
 		);
+		CREATE TABLE IF NOT EXISTS mine.shape (
+			service text NOT NULL,
+			shape_id bigint NOT NULL,
+			template text NOT NULL,
+			members integer NOT NULL DEFAULT 0,
+			size_bucket_sum integer NOT NULL DEFAULT 0,
+			flag_present integer NOT NULL DEFAULT 0,
+			flag_in integer NOT NULL DEFAULT 0,
+			actors jsonb NOT NULL DEFAULT '{}'::jsonb,
+			first_seen bigint NOT NULL DEFAULT 0,
+			last_seen bigint NOT NULL DEFAULT 0,
+			PRIMARY KEY (service, shape_id)
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

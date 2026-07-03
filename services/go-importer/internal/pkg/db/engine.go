@@ -217,6 +217,99 @@ func groupTurns(chunks []rawChunk) []Turn {
 	return turns
 }
 
+// FlowMessage is one flow_item rendered in its direction's most-decoded
+// representation, tagged with its direction — the ordered building block a
+// segmenter pairs on. Unlike FlowAnalysisData (which collapses each direction
+// into one concatenated stream) a slice of FlowMessages PRESERVES the
+// client/server alternation and per-item order, so a segmenter can pair each
+// request with the response that actually followed it rather than by global
+// index. This is what recovers the per-op response pairing the offline shape
+// prototype could not (it only had direction-concatenated bytes).
+type FlowMessage struct {
+	FromClient bool
+	Kind       string // the selected most-decoded kind for this direction
+	Data       []byte
+}
+
+// dirChunk is one direction- and kind-tagged flow_item, in id (arrival) order.
+type dirChunk struct {
+	fromClient bool
+	kind       string
+	data       []byte
+}
+
+// orderedMessages returns the chunks of each direction's most-decoded kind, in
+// arrival order, tagged with direction. The best kind is chosen PER DIRECTION
+// (mirroring FlowAnalysisData's topmost(c)/topmost(s) split): a client stream
+// captured raw and a server stream TLS-decrypted each keep their own deepest
+// layer rather than one global choice dropping a whole side. Each returned
+// message owns its bytes (never aliasing the pgx row buffers).
+func orderedMessages(chunks []dirChunk) []FlowMessage {
+	bestC, bestS := "", ""
+	for _, c := range chunks {
+		if c.fromClient {
+			if bestC == "" || lessDecoded(bestC, c.kind) {
+				bestC = c.kind
+			}
+		} else {
+			if bestS == "" || lessDecoded(bestS, c.kind) {
+				bestS = c.kind
+			}
+		}
+	}
+	var out []FlowMessage
+	for _, c := range chunks {
+		best := bestS
+		if c.fromClient {
+			best = bestC
+		}
+		if best == "" || c.kind != best {
+			continue
+		}
+		out = append(out, FlowMessage{
+			FromClient: c.fromClient,
+			Kind:       c.kind,
+			Data:       append([]byte(nil), c.data...),
+		})
+	}
+	return out
+}
+
+// FlowMessages returns a flow's most-decoded bytes as ordered, direction-tagged
+// messages: one FlowMessage per flow_item of its direction's topmost kind, in id
+// (conversation) order, bounded by the flow's id window like FlowAnalysisData.
+// Read-only. The ordering is what lets a segmenter pair each request unit with
+// the response that actually followed it (fixing the line-protocol interleaving
+// the offline prototype lost). It does not merge same-direction chunks; callers
+// that want turns can group consecutive same-direction messages themselves.
+func (db *Database) FlowMessages(flowId uuid.UUID) ([]FlowMessage, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT direction, kind, data FROM flow_item
+		WHERE flow_id = $1
+			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
+			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
+		ORDER BY id
+	`, flowId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []dirChunk
+	for rows.Next() {
+		var dir, kind string
+		var data []byte
+		if err := rows.Scan(&dir, &kind, &data); err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, dirChunk{fromClient: dir == "c", kind: kind, data: data})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return orderedMessages(chunks), nil
+}
+
 // ClusterMemberData returns the client plaintext of up to limit recent flows
 // carrying the given tag (e.g. "cluster:CCalendar:7"), within the horizon.
 func (db *Database) ClusterMemberData(tag string, horizonSecs float64, limit int) ([][]byte, error) {

@@ -75,6 +75,11 @@ func main() {
 	var units []unitRow
 	svcUnits := map[string][]int{}
 
+	// Cross-check: the streaming ShapeStore should derive the same number of
+	// per-request shapes as the pure per-service Drain pass below. It is fed the
+	// same segmented units + response features, one flow at a time.
+	store := mine.NewShapeStore(0)
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
@@ -97,6 +102,7 @@ func main() {
 
 		fidx := len(flows)
 		fr := flowRow{svc: svc, flagOut: r.FlagOut, proto: fl.Proto}
+		flFeats := make([]mine.RespFeatures, 0, len(fl.Units))
 		for _, u := range fl.Units {
 			sk, ua := mine.NormalizeUnit(u)
 			var feats mine.RespFeatures
@@ -108,6 +114,7 @@ func main() {
 				feats = mine.FlowLevelFeatures(fl.Server)
 				isExfil = fl.FlagOut // line proto: cannot localize per op
 			}
+			flFeats = append(flFeats, feats)
 			uidx := len(units)
 			units = append(units, unitRow{
 				svc: svc, flowIdx: fidx, skeleton: sk, ua: ua,
@@ -117,6 +124,7 @@ func main() {
 			fr.unitRows = append(fr.unitRows, uidx)
 			svcUnits[svc] = append(svcUnits[svc], uidx)
 		}
+		store.Observe(svc, fl.Units, flFeats, r.FlagIn, int64(fidx))
 		flows = append(flows, fr)
 	}
 	if err := sc.Err(); err != nil {
@@ -187,6 +195,17 @@ func main() {
 	fmt.Printf("flows=%d units=%d elapsed=%.2fs\n", len(flows), len(units), elapsed.Seconds())
 	fmt.Printf("per-request shapes (stage4a) = %d\n", nShapes)
 	fmt.Printf("split-shapes (stage5)        = %d\n", nSplits)
+
+	// ShapeStore parity: the streaming store must derive the same shape count.
+	storeShapes := 0
+	for _, svc := range services {
+		storeShapes += store.ShapeCount(svc)
+	}
+	parity := "MATCH"
+	if storeShapes != nShapes {
+		parity = "MISMATCH"
+	}
+	fmt.Printf("shapestore per-request shapes = %d  (vs pure pipeline %d: %s)\n", storeShapes, nShapes, parity)
 	fmt.Printf("session shapes: b1(client-only)=%d  b2(client+response)=%d\n", len(sessB1), len(sessB2))
 
 	fmt.Println("\nper service:")
