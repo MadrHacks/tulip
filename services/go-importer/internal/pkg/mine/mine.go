@@ -42,6 +42,7 @@ type Engine struct {
 	templatedAt     map[string]int
 	lastSynthAt     time.Time
 	lastPropagateAt time.Time
+	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
 
 	dataClock int64 // newest flow time seen (unix sec), drives eviction
 
@@ -68,6 +69,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		flagRe:        regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:  config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
 		templatedAt:   map[string]int{},
+		verdicts:      map[string]string{},
 		chains:        map[string]*chainAnalyzer{},
 		chainClusters: newChainClusterStore(),
 		chainWindow:   int64(cfg.ChainWindow.Seconds()),
@@ -167,7 +169,13 @@ func (e *Engine) handle(f *Flow) {
 	id, _ := store.Assign(sig, t)
 
 	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
-	e.db.FlowAddTags(f.Id, []string{clusterTag, e.roleTag(f, service)})
+	tags := []string{clusterTag, e.roleTag(f, service)}
+	// A fresh flow matching a cluster the operator already judged inherits that
+	// verdict immediately, in the same write — no periodic bulk propagation.
+	if sugg := e.verdicts[clusterTag]; sugg != "" {
+		tags = append(tags, sugg)
+	}
+	e.db.FlowAddTags(f.Id, tags)
 	if !e.cfg.ChainDisable {
 		e.observeChain(f, service, clusterTag, client, server)
 	}
