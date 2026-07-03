@@ -4,20 +4,35 @@ import { useAppDispatch } from "../store";
 import { toggleFilterTag } from "../store/filter";
 import { useGetTemplatesQuery, useLazyGetTemplateScaffoldQuery } from "../api";
 import { Tag } from "../components/Tag";
+import { useCopy } from "../hooks/useCopy";
+
+// Copies the instantiated scaffold for a cluster to the clipboard. Uses the
+// shared useCopy hook so it falls back to a temporary textarea + execCommand on
+// insecure origins (the cockpit is served over plain HTTP on a LAN/VPN IP, where
+// navigator.clipboard is undefined) instead of silently throwing.
+function ScaffoldCopyButton({ service, clusterId }: { service: string; clusterId: number }) {
+  const [getScaffold] = useLazyGetTemplateScaffoldQuery();
+  const { statusText, copy } = useCopy({
+    getText: async () => {
+      const { data } = await getScaffold({ service, clusterId });
+      return data ?? "";
+    },
+  });
+  return (
+    <button
+      onClick={copy}
+      className="px-2 py-1 text-xs font-medium rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/30"
+    >
+      {statusText}
+    </button>
+  );
+}
 
 export function TemplatesView() {
   const { data: templates = [] } = useGetTemplatesQuery();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const [getScaffold] = useLazyGetTemplateScaffoldQuery();
-
-  const copyScaffold = async (service: string, clusterId: number) => {
-    const { data } = await getScaffold({ service, clusterId });
-    if (data) {
-      await navigator.clipboard.writeText(data);
-    }
-  };
 
   const sorted = useMemo(
     () => [...templates].sort((a, b) => {
@@ -80,12 +95,7 @@ export function TemplatesView() {
                 </td>
                 <td className="px-3 py-2 text-center font-mono">{template.version}</td>
                 <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => copyScaffold(template.service, template.cluster_id)}
-                    className="px-2 py-1 text-xs font-medium rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/30"
-                  >
-                    Copy
-                  </button>
+                  <ScaffoldCopyButton service={template.service} clusterId={template.cluster_id} />
                 </td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <Tag tag={template.tag} />

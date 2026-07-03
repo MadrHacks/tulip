@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppDispatch } from "../store";
 import { toggleFilterTag } from "../store/filter";
@@ -26,14 +26,33 @@ export function ClustersView() {
     [templates]
   );
 
-  // A/D triage order: clusters tied to flag loss first, then services we're
-  // bleeding on (heat), then raw volume. Puts the "patch this now" rows on top.
-  const sorted = useMemo(() => {
-    const lost = (c: Cluster) => heat[c.service]?.our_lost ?? 0;
-    return [...clusters].sort(
-      (a, b) =>
-        b.flag_out - a.flag_out || lost(b) - lost(a) || b.count - a.count
-    );
+  // Group clusters under their service so the service-level heat (SLA / lost /
+  // stolen) is shown once per service instead of being repeated — and misread as
+  // per-cluster — on every row. A/D triage order across services: flag loss
+  // first, then services we're bleeding on (heat), then raw volume; within a
+  // service, the clusters leaking the most flags come first.
+  const grouped = useMemo(() => {
+    const lost = (service: string) => heat[service]?.our_lost ?? 0;
+    const byService = new Map<string, Cluster[]>();
+    for (const c of clusters) {
+      const arr = byService.get(c.service);
+      if (arr) arr.push(c);
+      else byService.set(c.service, [c]);
+    }
+    return [...byService.entries()]
+      .map(([service, cs]) => ({
+        service,
+        flagOut: cs.reduce((sum, c) => sum + c.flag_out, 0),
+        clusters: [...cs].sort(
+          (a, b) => b.flag_out - a.flag_out || b.count - a.count
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          b.flagOut - a.flagOut ||
+          lost(b.service) - lost(a.service) ||
+          a.service.localeCompare(b.service)
+      );
   }, [clusters, heat]);
 
   const openCluster = (tag: string) => {
@@ -79,76 +98,91 @@ export function ClustersView() {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-subtle bg-panel sticky top-0">
-              <th className="px-3 py-2 text-left text-secondary font-semibold">Service</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Cluster</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flows</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flag out</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Flag in</th>
-              <th className="px-3 py-2 text-center text-secondary font-semibold">SLA</th>
-              <th className="px-3 py-2 text-center text-secondary font-semibold">Lost</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Template</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Verdict</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Tag</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((cluster) => (
-              <tr
-                key={cluster.tag}
-                className="border-b border-subtle hover:bg-gray-500/10 cursor-pointer"
-                onClick={() => openCluster(cluster.tag)}
-              >
-                <td className="px-3 py-2 font-medium">{cluster.service}</td>
-                <td className="px-3 py-2 font-mono text-xs">{cluster.id}</td>
-                <td className="px-3 py-2 text-center">{cluster.count}</td>
-                <td className="px-3 py-2 text-center">
-                  {cluster.flag_out > 0 && (
-                    <span className="inline-block px-2 py-0.5 rounded bg-red-500/20 text-red-600 dark:text-red-400">
-                      {cluster.flag_out}
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {cluster.flag_in > 0 && (
-                    <span className="inline-block px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
-                      {cluster.flag_in}
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {heat[cluster.service] && (
-                    <span
-                      className={
-                        heat[cluster.service].our_sla_ok
-                          ? "text-green-600 dark:text-green-400"
-                          : "text-red-600 dark:text-red-400 font-semibold"
-                      }
+            {grouped.map((group) => {
+              const h = heat[group.service];
+              return (
+                <Fragment key={group.service}>
+                  {/* Service heat shown once for the whole service, not per row. */}
+                  <tr className="border-b border-subtle bg-gray-500/10">
+                    <td colSpan={7} className="px-3 py-2">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="font-semibold">{group.service}</span>
+                        <span className="text-xs text-secondary">
+                          {group.clusters.length} cluster{group.clusters.length === 1 ? "" : "s"}
+                        </span>
+                        {h && (
+                          <span
+                            className={`text-xs ${
+                              h.our_sla_ok
+                                ? "text-green-600 dark:text-green-400"
+                                : "text-red-600 dark:text-red-400 font-semibold"
+                            }`}
+                          >
+                            SLA {h.our_sla_ok ? "ok" : "down"}
+                          </span>
+                        )}
+                        {h && h.our_lost > 0 && (
+                          <span className="text-xs inline-block px-2 py-0.5 rounded bg-orange-500/20 text-orange-600 dark:text-orange-400">
+                            {h.our_lost} lost
+                          </span>
+                        )}
+                        {h && h.our_stolen > 0 && (
+                          <span className="text-xs inline-block px-2 py-0.5 rounded bg-red-500/20 text-red-600 dark:text-red-400">
+                            {h.our_stolen} stolen
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {group.clusters.map((cluster) => (
+                    <tr
+                      key={cluster.tag}
+                      className="border-b border-subtle hover:bg-gray-500/10 cursor-pointer"
+                      onClick={() => openCluster(cluster.tag)}
                     >
-                      {heat[cluster.service].our_sla_ok ? "ok" : "down"}
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {heat[cluster.service]?.our_lost > 0 && (
-                    <span className="inline-block px-2 py-0.5 rounded bg-orange-500/20 text-orange-600 dark:text-orange-400">
-                      {heat[cluster.service].our_lost}
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {templatedTags.has(cluster.tag) && (
-                    <span className="text-blue-600 dark:text-blue-400 font-semibold">✓</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                  {verdictBtn(cluster.tag, "attack", "⚔ Exploit", "bg-red-500/25 text-red-600 dark:text-red-400")}
-                  {verdictBtn(cluster.tag, "benign", "✓ Benign", "bg-green-500/25 text-green-600 dark:text-green-400")}
-                </td>
-                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                  <Tag tag={cluster.tag} />
-                </td>
-              </tr>
-            ))}
+                      <td className="px-3 py-2 font-mono text-xs">{cluster.id}</td>
+                      <td className="px-3 py-2 text-center">{cluster.count}</td>
+                      <td className="px-3 py-2 text-center">
+                        {cluster.flag_out > 0 && (
+                          <span className="inline-block px-2 py-0.5 rounded bg-red-500/20 text-red-600 dark:text-red-400">
+                            {cluster.flag_out}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {cluster.flag_in > 0 && (
+                          <span className="inline-block px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
+                            {cluster.flag_in}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {templatedTags.has(cluster.tag) && (
+                          <span className="text-blue-600 dark:text-blue-400 font-semibold">✓</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {verdictBtn(cluster.tag, "attack", "⚔ Exploit", "bg-red-500/25 text-red-600 dark:text-red-400")}
+                        {verdictBtn(cluster.tag, "benign", "✓ Benign", "bg-green-500/25 text-green-600 dark:text-green-400")}
+                      </td>
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                        <Tag tag={cluster.tag} />
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

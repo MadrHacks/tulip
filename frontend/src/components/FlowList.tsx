@@ -4,7 +4,7 @@ import {
   useParams,
   useNavigate,
 } from "react-router-dom";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useHotkeys } from 'react-hotkeys-hook';
 import { FetchBaseQueryError } from '@reduxjs/toolkit/query'
 import { Flow } from "../types";
@@ -57,6 +57,22 @@ export function FlowList() {
   const fuzzyHashIds = useAppSelector((state) => state.filter.fuzzyHashIds);
 
   const dispatch = useAppDispatch();
+
+  // Keep the flat tag filter usable: minecore emits hundreds of per-cluster
+  // `cluster:<service>:<id>` and `role:<...>` tags that belong to the dedicated
+  // Clusters view, not this generic chip list. Hide them here, but still show any
+  // that are currently active so a cluster filter opened from the Clusters view
+  // can be toggled off. Structural tags (flag-in/flag-out/tcp/http/enc/…) stay.
+  const filterableTags = useMemo(
+    () =>
+      (availableTags ?? []).filter(
+        (tag) =>
+          includeTags.includes(tag) ||
+          excludeTags.includes(tag) ||
+          (!tag.startsWith("cluster:") && !tag.startsWith("role:"))
+      ),
+    [availableTags, includeTags, excludeTags]
+  );
 
   const [starFlow] = useStarFlowMutation();
 
@@ -224,7 +240,7 @@ export function FlowList() {
               </button>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {(availableTags ?? []).map((tag) => (
+              {filterableTags.map((tag) => (
                 <Tag
                   key={tag}
                   tag={tag}
