@@ -276,10 +276,14 @@ func (e *Engine) maybeSnapshot(ctx context.Context) {
 		return
 	}
 	e.evictClusters(ctx)
+	before := e.dataClock - int64(e.cfg.Horizon.Seconds())
 	for service, store := range e.shards {
 		saveClusterSnapshots(ctx, e.db.Pool(), service, store.snapshot())
 	}
 	for service, calib := range e.calibrators {
+		if gone := calib.evictStale(before); len(gone) > 0 {
+			deleteCalibratorSources(ctx, e.db.Pool(), service, gone)
+		}
 		saveCalibratorSnapshots(ctx, e.db.Pool(), service, calib.snapshot())
 	}
 	e.lastSnapshotAt = time.Now()

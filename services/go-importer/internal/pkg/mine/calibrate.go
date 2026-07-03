@@ -87,6 +87,20 @@ func NewCalibrator() *Calibrator {
 	return &Calibrator{stats: make(map[string]*sourceStat)}
 }
 
+// evictStale drops sources not seen since before, returning their keys. The
+// checker probes every tick so it is always within the horizon and never
+// evicted; quiet attacker/noise sources are what leave, keeping the map bounded.
+func (c *Calibrator) evictStale(before int64) []string {
+	var gone []string
+	for src, s := range c.stats {
+		if s.lastSeen < before {
+			delete(c.stats, src)
+			gone = append(gone, src)
+		}
+	}
+	return gone
+}
+
 func (c *Calibrator) Observe(o Obs) {
 	if c.stats == nil {
 		c.stats = make(map[string]*sourceStat)
