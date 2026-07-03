@@ -45,8 +45,9 @@ type Engine struct {
 	lastPropagateAt time.Time
 	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
 
-	dataClock    int64 // newest flow time seen (unix sec), drives eviction
-	lastDetectAt time.Time
+	dataClock             int64 // newest flow time seen (unix sec), drives eviction
+	lastDetectAt          time.Time
+	warnedServiceMismatch bool // one-shot: config names don't match the scoreboard
 
 	chains           map[string]*chainAnalyzer // per service
 	chainClusters    *chainClusterStore        // shared id allocator

@@ -27,6 +27,7 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 	if len(lost) == 0 {
 		return
 	}
+	e.warnOnServiceNameMismatch(lost)
 	for service, store := range e.shards {
 		if lost[service] <= 0 {
 			continue
@@ -37,6 +38,35 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// warnOnServiceNameMismatch fails loud at the boundary where the two service-name
+// sources meet: heat is keyed by the scoreboard's names, clusters by the
+// services.yml names. If a service the scoreboard says we're losing has no
+// matching cluster shard, the config names don't line up with the scoreboard —
+// which would otherwise silently detect nothing. We warn once rather than
+// tolerating the mismatch downstream.
+func (e *Engine) warnOnServiceNameMismatch(lost map[string]int) {
+	if e.warnedServiceMismatch {
+		return
+	}
+	for svc := range lost {
+		if _, ok := e.shards[svc]; ok {
+			return // at least one lines up; config is consistent
+		}
+	}
+	e.warnedServiceMismatch = true
+	scoreboard := make([]string, 0, len(lost))
+	for s := range lost {
+		scoreboard = append(scoreboard, s)
+	}
+	configured := make([]string, 0, len(e.shards))
+	for s := range e.shards {
+		configured = append(configured, s)
+	}
+	log.Printf("minecore: scoreboard service names %v do not match any configured service %v — "+
+		"align services.yml names exactly with the scoreboard (names are matched, not normalized)",
+		scoreboard, configured)
 }
 
 // loadHeatLoss returns service -> flags we lost, for services under attack.
