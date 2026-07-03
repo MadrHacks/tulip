@@ -304,7 +304,8 @@ class Connection(psycopg.Connection):
 
     def cluster_summaries(self, since_seconds: int | None = None) -> list[dict]:
         parameters: dict[str, Any] = {}
-        where_clause = "WHERE t.tag LIKE 'cluster:%'"
+        # %% because psycopg parses % as a placeholder whenever params are passed.
+        where_clause = "WHERE t.tag LIKE 'cluster:%%'"
         if since_seconds is not None:
             parameters["since"] = since_seconds
             where_clause += (
