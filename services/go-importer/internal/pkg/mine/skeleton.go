@@ -263,20 +263,31 @@ func normalizeHTTP(unit []byte) (toks []string, ua string) {
 	return toks, ua
 }
 
-// normalizeLine turns a line-protocol op unit into its skeleton token list:
-// OP<digit> followed by each masked whitespace-split argument.
+// normalizeLine turns a line-protocol op unit into its skeleton token list: every
+// whitespace-split token masked, with the unit's FIRST token carrying the "OP"
+// prefix. The first token is masked like the rest — a small-int menu selector
+// stays literal (maskToken keeps <3-digit runs and short words), but a value-
+// carrying first line (an argument submitted as its own turn, e.g. a flight id or
+// flagId under the per-turn segmentation) collapses to OP<TOK>/OP<NUM> instead of
+// freezing the raw value as a constant. Without this the exfil families fragment
+// into one shape per submitted value.
 func normalizeLine(unit []byte) (toks []string, ua string) {
-	lines := bytes.Split(unit, []byte("\n"))
-	op := string(bytes.TrimSpace(lines[0]))
-	toks = []string{"OP" + op}
-	for _, arg := range lines[1:] {
-		a := string(bytes.TrimSpace(arg))
+	toks = []string{}
+	for _, ln := range bytes.Split(unit, []byte("\n")) {
+		a := string(bytes.TrimSpace(ln))
 		if a == "" {
 			continue
 		}
 		for _, piece := range strings.Fields(a) {
-			toks = append(toks, maskToken(piece))
+			m := maskToken(piece)
+			if len(toks) == 0 {
+				m = "OP" + m // first token of the unit = the opcode slot
+			}
+			toks = append(toks, m)
 		}
+	}
+	if len(toks) == 0 {
+		toks = []string{"OP"}
 	}
 	return toks, ""
 }
