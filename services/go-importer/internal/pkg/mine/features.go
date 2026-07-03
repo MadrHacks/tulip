@@ -10,6 +10,11 @@ package mine
 const (
 	shingleK = 8
 	minhashN = 128
+
+	// maxFeatureBytes caps the input to Featurize. A request's shape is captured
+	// by its first several KB (method, path, headers, body start); truncating
+	// there keeps MinHash cost bounded on large bodies without hurting clustering.
+	maxFeatureBytes = 8192
 )
 
 var (

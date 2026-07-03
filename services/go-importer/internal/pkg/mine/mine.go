@@ -148,6 +148,9 @@ func (e *Engine) handle(f *Flow) {
 	}
 
 	canon := Normalize(client, e.flagRe, e.flagIDs)
+	if len(canon) > maxFeatureBytes {
+		canon = canon[:maxFeatureBytes]
+	}
 	sig, _ := Featurize(canon)
 
 	t := f.Time.Unix()
