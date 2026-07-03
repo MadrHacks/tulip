@@ -128,9 +128,17 @@ func (e *Engine) maybeSynthInteractive(ctx context.Context, service string, id i
 	e.interactiveSynthed[key] = true
 
 	tag := fmt.Sprintf("cluster:%s:%d", service, id)
+	// Pick the RICHEST flag-leaking flow in the cluster (most client turns), not
+	// an arbitrary one: a degenerate 1-turn capture would look non-interactive and
+	// be skipped, while the full multi-turn session is the real exploit script.
 	var flowID uuid.UUID
 	err := e.db.Pool().QueryRow(ctx,
-		`SELECT id FROM flow WHERE tags ? $1 AND tags ? 'flag-out' ORDER BY id LIMIT 1`,
+		`SELECT fi.flow_id
+		 FROM flow_item fi JOIN flow f ON f.id = fi.flow_id
+		 WHERE f.tags ? $1 AND f.tags ? 'flag-out' AND fi.kind = 'raw' AND fi.direction = 'c'
+		 GROUP BY fi.flow_id
+		 ORDER BY count(*) DESC
+		 LIMIT 1`,
 		tag).Scan(&flowID)
 	if err != nil {
 		return
