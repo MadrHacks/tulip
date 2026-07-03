@@ -1,14 +1,22 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppDispatch } from "../store";
 import { toggleFilterTag } from "../store/filter";
-import { useGetClustersQuery, useGetTemplatesQuery, useGetHeatQuery } from "../api";
+import {
+  useGetClustersQuery,
+  useGetTemplatesQuery,
+  useGetHeatQuery,
+  useFlowsTagBulkMutation,
+} from "../api";
+import { Cluster } from "../types";
 import { Tag } from "../components/Tag";
 
 export function ClustersView() {
   const { data: clusters = [] } = useGetClustersQuery();
   const { data: templates = [] } = useGetTemplatesQuery();
   const { data: heat = {} } = useGetHeatQuery();
+  const [flowsTagBulk] = useFlowsTagBulkMutation();
+  const [labeled, setLabeled] = useState<Record<string, string>>({});
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -17,14 +25,51 @@ export function ClustersView() {
     () => new Set(templates.map((t) => t.tag)),
     [templates]
   );
-  const sorted = useMemo(
-    () => [...clusters].sort((a, b) => b.count - a.count),
-    [clusters]
-  );
+
+  // A/D triage order: clusters tied to flag loss first, then services we're
+  // bleeding on (heat), then raw volume. Puts the "patch this now" rows on top.
+  const sorted = useMemo(() => {
+    const lost = (c: Cluster) => heat[c.service]?.our_lost ?? 0;
+    return [...clusters].sort(
+      (a, b) =>
+        b.flag_out - a.flag_out || lost(b) - lost(a) || b.count - a.count
+    );
+  }, [clusters, heat]);
 
   const openCluster = (tag: string) => {
     dispatch(toggleFilterTag(tag));
     navigate(`/?${searchParams}`);
+  };
+
+  const label = (tag: string, verdict: "attack" | "benign") => {
+    flowsTagBulk({
+      query: { tags_include: [tag] },
+      tag: `verdict:${verdict}`,
+      apply: true,
+    });
+    setLabeled((prev) => ({ ...prev, [tag]: verdict }));
+  };
+
+  const verdictBtn = (
+    tag: string,
+    verdict: "attack" | "benign",
+    label_: string,
+    active: string
+  ) => {
+    const on = labeled[tag] === verdict;
+    return (
+      <button
+        className={`px-2 py-0.5 rounded text-xs mr-1 ${
+          on ? active : "bg-gray-500/15 text-secondary hover:bg-gray-500/30"
+        }`}
+        onClick={(e) => {
+          e.stopPropagation();
+          label(tag, verdict);
+        }}
+      >
+        {label_}
+      </button>
+    );
   };
 
   return (
@@ -42,6 +87,7 @@ export function ClustersView() {
               <th className="px-3 py-2 text-center text-secondary font-semibold">SLA</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Lost</th>
               <th className="px-3 py-2 text-center text-secondary font-semibold">Template</th>
+              <th className="px-3 py-2 text-left text-secondary font-semibold">Verdict</th>
               <th className="px-3 py-2 text-left text-secondary font-semibold">Tag</th>
             </tr>
           </thead>
@@ -93,6 +139,10 @@ export function ClustersView() {
                   {templatedTags.has(cluster.tag) && (
                     <span className="text-blue-600 dark:text-blue-400 font-semibold">✓</span>
                   )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  {verdictBtn(cluster.tag, "attack", "⚔ Exploit", "bg-red-500/25 text-red-600 dark:text-red-400")}
+                  {verdictBtn(cluster.tag, "benign", "✓ Benign", "bg-green-500/25 text-green-600 dark:text-green-400")}
                 </td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <Tag tag={cluster.tag} />
