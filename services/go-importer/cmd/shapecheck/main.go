@@ -127,7 +127,7 @@ func main() {
 			fr.unitRows = append(fr.unitRows, uidx)
 			svcUnits[svc] = append(svcUnits[svc], uidx)
 		}
-		store.Observe(svc, fl.Units, flFeats, r.FlagIn, int64(fidx))
+		store.Observe(svc, fl.Units, flFeats, r.FlagIn, r.Port, int64(fidx))
 		flows = append(flows, fr)
 	}
 	if err := sc.Err(); err != nil {

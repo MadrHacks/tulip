@@ -24,7 +24,7 @@ func TestBuildShapeTagsDrivesShapePath(t *testing.T) {
 		{FromClient: true, Data: []byte("GET /api/note/42 HTTP/1.1\r\nHost: t\r\nUser-Agent: checker\r\n\r\n")},
 		{FromClient: false, Data: []byte("HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\nABCDEFGHIJKLMNOPQRSTUVWXYZ01234=")},
 	}
-	tags1 := buildShapeTags(store, "svc", flow1, false, 1000)
+	tags1 := buildShapeTags(store, "svc", flow1, false, 8080, 1000)
 
 	var shapeTags1 []string
 	sessionTags := 0
@@ -52,7 +52,7 @@ func TestBuildShapeTagsDrivesShapePath(t *testing.T) {
 		{FromClient: true, Data: []byte("GET /api/note/99 HTTP/1.1\r\nHost: t\r\nUser-Agent: checker\r\n\r\n")},
 		{FromClient: false, Data: []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")},
 	}
-	tags2 := buildShapeTags(store, "svc", flow2, false, 1001)
+	tags2 := buildShapeTags(store, "svc", flow2, false, 8080, 1001)
 	noteTag := shapeTags1[1] // "shape:svc:<noteID>"
 	found := false
 	for _, tg := range tags2 {

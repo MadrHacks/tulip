@@ -51,6 +51,33 @@ type shapeState struct {
 	// typed slots), nil until the shape reaches quorum. Persisted as the
 	// template_body jsonb column so it survives a restart until re-synthesized.
 	template *Template
+	// ports is the histogram of member destination ports (port -> member count).
+	// A shape is per-service and a service almost always lives on one port, so
+	// this is near-degenerate; its mode is the shape's representative REPLAY port.
+	// Only the mode is persisted (mine.shape.port); on restore the histogram is
+	// re-seeded from it so the representative stays stable across a restart.
+	ports map[int]int
+}
+
+// repPort is the shape's representative destination port: the most-common member
+// port (its mode), with a deterministic (smallest-port) tie-break so the choice
+// is stable regardless of map iteration order. 0 when no port was ever recorded.
+func (st *shapeState) repPort() int {
+	best, bestN := 0, -1
+	for p, n := range st.ports {
+		if n > bestN || (n == bestN && p < best) {
+			best, bestN = p, n
+		}
+	}
+	return best
+}
+
+// observePort folds one member's destination port into the shape's histogram.
+func (st *shapeState) observePort(port int) {
+	if st.ports == nil {
+		st.ports = map[int]int{}
+	}
+	st.ports[port]++
 }
 
 // observeSample folds one raw request-unit sample into the shape's bounded
@@ -124,10 +151,12 @@ type ObserveResult struct {
 // each unit it runs skeleton -> Drain -> shape id, updates that shape's members
 // and aggregated signal vector, and records the flow's session shape. feats must
 // be paired 1:1 with units (feats[i] is unit i's response signal vector);
-// flagIn is the flow-level flag_in signal, carried onto every unit's shape. t is
-// the flow time, recorded for eviction. Actors (User-Agent) are read per unit
-// from the skeleton pass, never a clustering token.
-func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespFeatures, flagIn bool, t int64) ObserveResult {
+// flagIn is the flow-level flag_in signal, carried onto every unit's shape. port
+// is the flow's destination port, folded into each touched shape's port histogram
+// so the shape can report a representative REPLAY port. t is the flow time,
+// recorded for eviction. Actors (User-Agent) are read per unit from the skeleton
+// pass, never a clustering token.
+func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespFeatures, flagIn bool, port int, t int64) ObserveResult {
 	sh := ss.shard(service)
 	ids := make([]int, 0, len(units))
 	for i, u := range units {
@@ -145,6 +174,7 @@ func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespF
 				shape:     Shape{TemplateID: id, Signals: ShapeSignals{Actors: map[string]int{}}},
 				firstSeen: t,
 				lastSeen:  t,
+				ports:     map[int]int{},
 			}
 			sh.shapes[id] = st
 		}
@@ -168,6 +198,7 @@ func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespF
 		if t < st.firstSeen {
 			st.firstSeen = t
 		}
+		st.observePort(port)
 		// Keep a bounded reservoir of the RAW unit bytes (not the skeleton) for
 		// replay-template synthesis. Members was just incremented above, so it is
 		// the running member count used for the deterministic reservoir slot.
@@ -195,6 +226,34 @@ func (ss *ShapeStore) Shapes(service string) []Shape {
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].TemplateID < out[j].TemplateID })
+	return out
+}
+
+// FlagShape identifies a shape carrying the flag_present SIGNAL, with its
+// representative replay port — the neutral unit the detection pass pursues.
+// flag_present is a SIGNAL (these responses leaked a flag), NEVER a verdict; the
+// replicator's NOP-proof remains the sole arbiter of a real exploit.
+type FlagShape struct {
+	ID   int
+	Port int
+}
+
+// FlagShapes returns a service shard's shapes whose flag_present signal is > 0,
+// each paired with its representative destination port, ordered by shape id. It
+// is the neutral shape-side twin of iterating clusters with flagOut > 0 in the
+// detection pass.
+func (ss *ShapeStore) FlagShapes(service string) []FlagShape {
+	sh := ss.shards[service]
+	if sh == nil {
+		return nil
+	}
+	out := make([]FlagShape, 0, len(sh.shapes))
+	for id, st := range sh.shapes {
+		if st.shape.Signals.FlagPresent > 0 {
+			out = append(out, FlagShape{ID: id, Port: st.repPort()})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
@@ -254,6 +313,7 @@ type shapeSnapshot struct {
 	Actors        map[string]int
 	FirstSeen     int64
 	LastSeen      int64
+	Port          int    // representative (most-common) member destination port
 	TemplateBody  []byte // marshaled *Template (replay template), or nil
 }
 
@@ -273,6 +333,7 @@ func (ss *ShapeStore) snapshot() map[string][]shapeSnapshot {
 				Actors:        copyActors(st.shape.Signals.Actors),
 				FirstSeen:     st.firstSeen,
 				LastSeen:      st.lastSeen,
+				Port:          st.repPort(),
 				TemplateBody:  st.templateBody(),
 			})
 		}
@@ -307,6 +368,17 @@ func restoreShapeStore(snaps map[string][]shapeSnapshot, maxShapes int) *ShapeSt
 				},
 				firstSeen: s.FirstSeen,
 				lastSeen:  s.LastSeen,
+				ports:     map[int]int{},
+			}
+			// Re-seed the port histogram from the persisted representative port,
+			// weighted by the member count, so the mode stays stable across a
+			// restart until new traffic on a different port outweighs it.
+			if s.Port != 0 {
+				weight := s.Members
+				if weight < 1 {
+					weight = 1
+				}
+				st.ports[s.Port] = weight
 			}
 			// Reload the persisted replay template so it is available before the
 			// reservoir re-accumulates and re-synthesizes it (samples themselves

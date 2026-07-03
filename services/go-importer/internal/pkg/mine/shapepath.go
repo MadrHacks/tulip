@@ -23,7 +23,7 @@ import (
 // buildShapeTags segments ordered messages, folds them into the store, and
 // returns the flow's neutral shape/session tags. Split out from shapeTags so it
 // is unit-testable without a live database. Returns nil for an empty flow.
-func buildShapeTags(store *ShapeStore, service string, msgs []db.FlowMessage, flagIn bool, t int64) []string {
+func buildShapeTags(store *ShapeStore, service string, msgs []db.FlowMessage, flagIn bool, port int, t int64) []string {
 	units := SegmentMessages(msgs)
 	if len(units) == 0 {
 		return nil
@@ -32,7 +32,7 @@ func buildShapeTags(store *ShapeStore, service string, msgs []db.FlowMessage, fl
 	for i := range units {
 		feats[i] = ResponseFeatures(units[i].Response)
 	}
-	res := store.Observe(service, units, feats, flagIn, t)
+	res := store.Observe(service, units, feats, flagIn, port, t)
 	tags := make([]string, 0, len(res.ShapeIDs)+1)
 	for _, id := range distinctShapeIDs(res.ShapeIDs) {
 		tags = append(tags, fmt.Sprintf("shape:%s:%d", service, id))
@@ -50,7 +50,7 @@ func (e *Engine) shapeTags(f *Flow, service string, t int64) []string {
 		log.Println("minecore: flow messages:", err)
 		return nil
 	}
-	return buildShapeTags(e.shapeStore, service, msgs, f.FlagsIn > 0, t)
+	return buildShapeTags(e.shapeStore, service, msgs, f.FlagsIn > 0, f.DstPort, t)
 }
 
 // snapshotShapes bounds each shape shard to the configured cap (deleting the

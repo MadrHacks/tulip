@@ -35,7 +35,7 @@ func TestShapeStoreObserveGroupsAndAggregates(t *testing.T) {
 		{}, // u2: no flag
 	}
 
-	res := ss.Observe("svc", []RequestUnit{u0, u1, u2}, feats, false, 1000)
+	res := ss.Observe("svc", []RequestUnit{u0, u1, u2}, feats, false, 8080, 1000)
 
 	if len(res.ShapeIDs) != 3 {
 		t.Fatalf("shape ids = %v, want 3", res.ShapeIDs)
@@ -79,7 +79,7 @@ func TestShapeStoreObserveGroupsAndAggregates(t *testing.T) {
 	}
 
 	// flag_in is a flow-level signal carried onto every unit's shape.
-	res2 := ss.Observe("svc", []RequestUnit{u0}, []RespFeatures{{}}, true, 1001)
+	res2 := ss.Observe("svc", []RequestUnit{u0}, []RespFeatures{{}}, true, 8080, 1001)
 	getShape, _ = shapeByID(ss, "svc", res2.ShapeIDs[0])
 	if getShape.Signals.FlagIn != 1 {
 		t.Errorf("flag_in = %d, want 1", getShape.Signals.FlagIn)
@@ -96,7 +96,7 @@ func TestShapeStoreSnapshotRestoreStableIDs(t *testing.T) {
 	u0 := mkHTTP(0, "GET /api/status HTTP/1.1\r\nHost: t\r\nUser-Agent: checker\r\n\r\n")
 	u1 := mkHTTP(1, "POST /api/login HTTP/1.1\r\nHost: t\r\nUser-Agent: wget\r\n"+
 		"Content-Type: application/json\r\nContent-Length: 27\r\n\r\n{\"password\":\"y\",\"user\":\"x\"}")
-	res := ss.Observe("svc", []RequestUnit{u0, u1}, []RespFeatures{{FlagPresent: true, ContentLengthBucket: 3}, {}}, false, 1000)
+	res := ss.Observe("svc", []RequestUnit{u0, u1}, []RespFeatures{{FlagPresent: true, ContentLengthBucket: 3}, {}}, false, 8080, 1000)
 	idGet, idPost := res.ShapeIDs[0], res.ShapeIDs[1]
 
 	restored := restoreShapeStore(ss.snapshot(), 0)
@@ -115,7 +115,7 @@ func TestShapeStoreSnapshotRestoreStableIDs(t *testing.T) {
 
 	// Same skeleton maps to the same id after restart, without creating a new shape.
 	before := restored.ShapeCount("svc")
-	again := restored.Observe("svc", []RequestUnit{u0}, []RespFeatures{{}}, false, 1002)
+	again := restored.Observe("svc", []RequestUnit{u0}, []RespFeatures{{}}, false, 8080, 1002)
 	if again.ShapeIDs[0] != idGet {
 		t.Errorf("restored assign of GET = %d, want stable %d", again.ShapeIDs[0], idGet)
 	}
@@ -125,7 +125,7 @@ func TestShapeStoreSnapshotRestoreStableIDs(t *testing.T) {
 
 	// A brand-new skeleton gets a fresh id beyond the restored max (no reuse).
 	uNew := mkHTTP(0, "DELETE /admin/wipe/everything HTTP/1.1\r\nHost: t\r\n\r\n")
-	newRes := restored.Observe("svc", []RequestUnit{uNew}, []RespFeatures{{}}, false, 1003)
+	newRes := restored.Observe("svc", []RequestUnit{uNew}, []RespFeatures{{}}, false, 8080, 1003)
 	if newRes.ShapeIDs[0] == idGet || newRes.ShapeIDs[0] == idPost {
 		t.Errorf("new skeleton reused an existing id: %d", newRes.ShapeIDs[0])
 	}
@@ -134,14 +134,85 @@ func TestShapeStoreSnapshotRestoreStableIDs(t *testing.T) {
 	}
 }
 
+// TestShapeStoreRecordsRepresentativePort: a shape records its members' ports as
+// a histogram whose mode is the shape's representative REPLAY port; that mode
+// rides the snapshot into mine.shape.port, is surfaced by FlagShapes, and is
+// re-seeded on restore so it stays stable.
+func TestShapeStoreRecordsRepresentativePort(t *testing.T) {
+	ss := NewShapeStore(0)
+	u := func() RequestUnit { return mkHTTP(0, "GET /api/item?id=1 HTTP/1.1\r\nHost: t\r\n\r\n") }
+	// Same skeleton -> one shape; member ports 80 (x2) and 9999 (x1). Mode = 80.
+	res := ss.Observe("svc", []RequestUnit{u()}, []RespFeatures{{FlagPresent: true}}, false, 80, 1000)
+	ss.Observe("svc", []RequestUnit{u()}, []RespFeatures{{}}, false, 9999, 1001)
+	ss.Observe("svc", []RequestUnit{u()}, []RespFeatures{{}}, false, 80, 1002)
+
+	if ss.ShapeCount("svc") != 1 {
+		t.Fatalf("shapes = %d, want 1 (same skeleton collapses them)", ss.ShapeCount("svc"))
+	}
+	id := res.ShapeIDs[0]
+	if got := ss.shards["svc"].shapes[id].repPort(); got != 80 {
+		t.Errorf("repPort = %d, want 80 (most-common member port)", got)
+	}
+
+	// The representative port rides the snapshot into mine.shape.port.
+	snapPort := -1
+	for _, s := range ss.snapshot()["svc"] {
+		if s.ShapeID == id {
+			snapPort = s.Port
+		}
+	}
+	if snapPort != 80 {
+		t.Errorf("snapshot port = %d, want 80", snapPort)
+	}
+
+	// FlagShapes surfaces the flag_present shape with its representative port.
+	fs := ss.FlagShapes("svc")
+	if len(fs) != 1 || fs[0].ID != id || fs[0].Port != 80 {
+		t.Fatalf("FlagShapes = %+v, want one {ID:%d Port:80}", fs, id)
+	}
+
+	// Restore re-seeds the histogram from the persisted port so the mode holds
+	// even though the raw histogram is not persisted.
+	restored := restoreShapeStore(ss.snapshot(), 0)
+	if got := restored.shards["svc"].shapes[id].repPort(); got != 80 {
+		t.Errorf("restored repPort = %d, want 80 (re-seeded from persisted port)", got)
+	}
+}
+
+// TestFlagShapesSelectsOnlyFlaggedShapes: FlagShapes — the neutral SOURCE the
+// detection pass pursues — returns only shapes whose flag_present SIGNAL is > 0,
+// each with its representative port, and nil for an unknown service.
+func TestFlagShapesSelectsOnlyFlaggedShapes(t *testing.T) {
+	ss := NewShapeStore(0)
+	// Shape A's response leaked a flag; shape B's never did.
+	a := ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /flag HTTP/1.1\r\nHost: t\r\n\r\n")},
+		[]RespFeatures{{FlagPresent: true}}, false, 1337, 1000)
+	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /benign HTTP/1.1\r\nHost: t\r\n\r\n")},
+		[]RespFeatures{{}}, false, 1337, 1001)
+
+	got := ss.FlagShapes("svc")
+	if len(got) != 1 {
+		t.Fatalf("FlagShapes = %+v, want exactly the flag_present shape", got)
+	}
+	if got[0].ID != a.ShapeIDs[0] {
+		t.Errorf("FlagShapes id = %d, want %d (the flag_present shape)", got[0].ID, a.ShapeIDs[0])
+	}
+	if got[0].Port != 1337 {
+		t.Errorf("FlagShapes port = %d, want 1337", got[0].Port)
+	}
+	if ss.FlagShapes("nope") != nil {
+		t.Error("FlagShapes on an unknown service should be nil")
+	}
+}
+
 // TestShapeStoreEvictToCap: the store caps each shard and drops the
 // least-recently-seen shapes, freeing them from the Drain too.
 func TestShapeStoreEvictToCap(t *testing.T) {
 	ss := NewShapeStore(2)
 	// Three structurally distinct skeletons, observed at increasing times.
-	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /alpha HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 1000)
-	res2 := ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /beta HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 1001)
-	res3 := ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /gamma HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 1002)
+	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /alpha HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 8080, 1000)
+	res2 := ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /beta HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 8080, 1001)
+	res3 := ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /gamma HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 8080, 1002)
 
 	if ss.ShapeCount("svc") != 3 {
 		t.Fatalf("pre-evict shapes = %d, want 3", ss.ShapeCount("svc"))

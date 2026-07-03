@@ -129,10 +129,38 @@ func (e *Engine) maybeSynthInteractive(ctx context.Context, service string, id i
 	}
 	e.interactiveSynthed[key] = true
 
-	tag := fmt.Sprintf("cluster:%s:%d", service, id)
-	// Pick the RICHEST flag-leaking flow in the cluster (most client turns), not
-	// an arbitrary one: a degenerate 1-turn capture would look non-interactive and
-	// be skipped, while the full multi-turn session is the real exploit script.
+	if plan := e.richestFlagFlowPlan(ctx, service, fmt.Sprintf("cluster:%s:%d", service, id), port); plan != nil {
+		saveInteractiveTemplate(ctx, e.db.Pool(), service, id, plan)
+	}
+}
+
+// maybeSynthInteractiveShape is the neutral shape-side twin of
+// maybeSynthInteractive: at most once per shape (guarded by
+// e.shapeInteractiveSynthed), it pulls the richest flag-leaking flow tagged
+// shape:<svc>:<id> and, when that session is genuinely multi-turn, synthesizes
+// and persists its interactive plan to mine.shape_interactive. A shape carrying
+// the flag_present SIGNAL is just a candidate SOURCE here; the replicator's
+// NOP-proof stays the sole arbiter of whether it is a real exploit.
+func (e *Engine) maybeSynthInteractiveShape(ctx context.Context, service string, id int64, port int) {
+	key := fmt.Sprintf("%s:%d", service, id)
+	if e.shapeInteractiveSynthed[key] {
+		return
+	}
+	e.shapeInteractiveSynthed[key] = true
+
+	if plan := e.richestFlagFlowPlan(ctx, service, fmt.Sprintf("shape:%s:%d", service, id), port); plan != nil {
+		saveShapeInteractiveTemplate(ctx, e.db.Pool(), service, id, port, plan)
+	}
+}
+
+// richestFlagFlowPlan finds the RICHEST flag-leaking flow tagged `tag` (most
+// client turns), and — only when that session is genuinely multi-turn (>= 2
+// client turns, which a single-flow template cannot express) — synthesizes its
+// interactive plan and returns the marshaled JSON. Returns nil when there is no
+// such flow, the fetch fails, or the session is single-turn. Shared by the
+// cluster and shape interactive paths, which differ only in the tag they select
+// and the table they persist to.
+func (e *Engine) richestFlagFlowPlan(ctx context.Context, service, tag string, port int) []byte {
 	var flowID uuid.UUID
 	err := e.db.Pool().QueryRow(ctx,
 		`SELECT fi.flow_id
@@ -143,11 +171,11 @@ func (e *Engine) maybeSynthInteractive(ctx context.Context, service string, id i
 		 LIMIT 1`,
 		tag).Scan(&flowID)
 	if err != nil {
-		return
+		return nil
 	}
 	turns, err := e.db.FlowTurns(flowID)
 	if err != nil {
-		return
+		return nil
 	}
 	clientTurns := 0
 	for _, t := range turns {
@@ -156,14 +184,14 @@ func (e *Engine) maybeSynthInteractive(ctx context.Context, service string, id i
 		}
 	}
 	if clientTurns < 2 {
-		return
+		return nil
 	}
 	encoded, err := json.Marshal(e.synthesizeInteractive(service, port, turns))
 	if err != nil {
 		log.Println("minecore: marshal interactive plan:", err)
-		return
+		return nil
 	}
-	saveInteractiveTemplate(ctx, e.db.Pool(), service, id, encoded)
+	return encoded
 }
 
 // saveInteractiveTemplate persists a synthesized plan, keeping the first one
@@ -176,5 +204,20 @@ func saveInteractiveTemplate(ctx context.Context, pool *pgxpool.Pool, service st
 	`, service, id, plan)
 	if err != nil {
 		log.Println("minecore: save interactive template:", err)
+	}
+}
+
+// saveShapeInteractiveTemplate persists a synthesized plan for a shape, keeping
+// the first one written for a shape (ON CONFLICT DO NOTHING). Its own table
+// (mine.shape_interactive) carries the shape's replay port so the candidate
+// reader can key the socket without a separate lookup.
+func saveShapeInteractiveTemplate(ctx context.Context, pool *pgxpool.Pool, service string, id int64, port int, plan []byte) {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO mine.shape_interactive (service, shape_id, port, plan)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (service, shape_id) DO NOTHING
+	`, service, id, port, plan)
+	if err != nil {
+		log.Println("minecore: save shape interactive template:", err)
 	}
 }

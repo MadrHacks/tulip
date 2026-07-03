@@ -41,6 +41,19 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 			}
 		}
 	}
+
+	// Parallel SHAPE-side detection (mirrors the cluster loop above). On a service
+	// we are losing flags on, every neutral shape carrying the flag_present SIGNAL
+	// is pursued once for an interactive session plan. This is the SOURCE the
+	// autonomous candidate reader now consumes; it stays NEUTRAL — flag_present is
+	// a signal, and the replicator's NOP-proof remains the sole arbiter of a real
+	// exploit. The single-flow shape template is already persisted by the snapshot
+	// pass (mine.shape.template_body), so nothing extra is written here for it.
+	for service := range lost {
+		for _, fs := range e.shapeStore.FlagShapes(service) {
+			e.maybeSynthInteractiveShape(ctx, service, int64(fs.ID), fs.Port)
+		}
+	}
 }
 
 // warnOnServiceNameMismatch fails loud at the boundary where the two service-name

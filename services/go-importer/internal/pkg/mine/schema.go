@@ -90,10 +90,20 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			actors jsonb NOT NULL DEFAULT '{}'::jsonb,
 			first_seen bigint NOT NULL DEFAULT 0,
 			last_seen bigint NOT NULL DEFAULT 0,
+			port integer NOT NULL DEFAULT 0,
 			template_body jsonb,
 			PRIMARY KEY (service, shape_id)
 		);
 			ALTER TABLE mine.shape ADD COLUMN IF NOT EXISTS template_body jsonb;
+			ALTER TABLE mine.shape ADD COLUMN IF NOT EXISTS port integer NOT NULL DEFAULT 0;
+		CREATE TABLE IF NOT EXISTS mine.shape_interactive (
+			service text NOT NULL,
+			shape_id bigint NOT NULL,
+			port integer NOT NULL DEFAULT 0,
+			plan jsonb NOT NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (service, shape_id)
+		);
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

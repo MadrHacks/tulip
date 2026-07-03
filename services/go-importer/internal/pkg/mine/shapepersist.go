@@ -19,7 +19,7 @@ func loadShapeSnapshots(ctx context.Context, pool *pgxpool.Pool) map[string][]sh
 	out := map[string][]shapeSnapshot{}
 	rows, err := pool.Query(ctx, `
 		SELECT service, shape_id, template, members, size_bucket_sum,
-			flag_present, flag_in, actors, first_seen, last_seen, template_body
+			flag_present, flag_in, actors, first_seen, last_seen, port, template_body
 		FROM mine.shape
 	`)
 	if err != nil {
@@ -32,7 +32,7 @@ func loadShapeSnapshots(ctx context.Context, pool *pgxpool.Pool) map[string][]sh
 		var s shapeSnapshot
 		var actors []byte
 		if err := rows.Scan(&service, &s.ShapeID, &s.Template, &s.Members, &s.SizeBucketSum,
-			&s.FlagPresent, &s.FlagIn, &actors, &s.FirstSeen, &s.LastSeen, &s.TemplateBody); err != nil {
+			&s.FlagPresent, &s.FlagIn, &actors, &s.FirstSeen, &s.LastSeen, &s.Port, &s.TemplateBody); err != nil {
 			log.Println("minecore: scan shape:", err)
 			return out
 		}
@@ -58,17 +58,17 @@ func saveShapeSnapshots(ctx context.Context, pool *pgxpool.Pool, service string,
 		_, err = pool.Exec(ctx, `
 			INSERT INTO mine.shape
 				(service, shape_id, template, members, size_bucket_sum,
-				 flag_present, flag_in, actors, first_seen, last_seen, template_body)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+				 flag_present, flag_in, actors, first_seen, last_seen, port, template_body)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			ON CONFLICT (service, shape_id) DO UPDATE SET
 				template = excluded.template, members = excluded.members,
 				size_bucket_sum = excluded.size_bucket_sum,
 				flag_present = excluded.flag_present, flag_in = excluded.flag_in,
 				actors = excluded.actors, first_seen = excluded.first_seen,
-				last_seen = excluded.last_seen,
+				last_seen = excluded.last_seen, port = excluded.port,
 				template_body = COALESCE(excluded.template_body, mine.shape.template_body)
 		`, service, s.ShapeID, s.Template, s.Members, s.SizeBucketSum,
-			s.FlagPresent, s.FlagIn, actors, s.FirstSeen, s.LastSeen, templateBodyArg(s.TemplateBody))
+			s.FlagPresent, s.FlagIn, actors, s.FirstSeen, s.LastSeen, s.Port, templateBodyArg(s.TemplateBody))
 		if err != nil {
 			log.Println("minecore: save shape:", err)
 			return

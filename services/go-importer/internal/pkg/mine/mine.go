@@ -47,10 +47,11 @@ type Engine struct {
 	lastPropagateAt time.Time
 	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
 
-	dataClock             int64 // newest flow time seen (unix sec), drives eviction
-	lastDetectAt          time.Time
-	warnedServiceMismatch bool            // one-shot: config names don't match the scoreboard
-	interactiveSynthed    map[string]bool // "service:cluster_id" attempted once for interactive synthesis
+	dataClock               int64 // newest flow time seen (unix sec), drives eviction
+	lastDetectAt            time.Time
+	warnedServiceMismatch   bool            // one-shot: config names don't match the scoreboard
+	interactiveSynthed      map[string]bool // "service:cluster_id" attempted once for interactive synthesis
+	shapeInteractiveSynthed map[string]bool // "service:shape_id" attempted once for shape interactive synthesis
 
 	chains           map[string]*chainAnalyzer // per service
 	chainClusters    *chainClusterStore        // shared id allocator
@@ -67,27 +68,28 @@ type Engine struct {
 
 func New(database *db.Database, cfg Config) *Engine {
 	return &Engine{
-		db:                 database,
-		cfg:                cfg,
-		shards:             map[string]*clusterStore{},
-		shapeStore:         NewShapeStore(cfg.MaxShapes),
-		calibrators:        map[string]*Calibrator{},
-		serviceByPort:      config.ServiceByPort(),
-		resolver:           newServiceResolver(config.ServiceDefs()),
-		flagRe:             regexp.MustCompile(config.GameFlagRegex()),
-		flagLifetime:       config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
-		templatedAt:        map[string]int{},
-		verdicts:           map[string]string{},
-		interactiveSynthed: map[string]bool{},
-		chains:             map[string]*chainAnalyzer{},
-		chainClusters:      newChainClusterStore(),
-		chainWindow:        int64(cfg.ChainWindow.Seconds()),
-		chainDFMax:         cfg.ChainDFMax,
-		chainMaxSize:       cfg.ChainMaxSize,
-		scoreboardURL:      config.ScoreboardBaseURL(),
-		teamID:             config.TeamID(),
-		gameStart:          parseGameStart(config.GameStart()),
-		gameTick:           time.Duration(config.GameTickDurationSec()) * time.Second,
+		db:                      database,
+		cfg:                     cfg,
+		shards:                  map[string]*clusterStore{},
+		shapeStore:              NewShapeStore(cfg.MaxShapes),
+		calibrators:             map[string]*Calibrator{},
+		serviceByPort:           config.ServiceByPort(),
+		resolver:                newServiceResolver(config.ServiceDefs()),
+		flagRe:                  regexp.MustCompile(config.GameFlagRegex()),
+		flagLifetime:            config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
+		templatedAt:             map[string]int{},
+		verdicts:                map[string]string{},
+		interactiveSynthed:      map[string]bool{},
+		shapeInteractiveSynthed: map[string]bool{},
+		chains:                  map[string]*chainAnalyzer{},
+		chainClusters:           newChainClusterStore(),
+		chainWindow:             int64(cfg.ChainWindow.Seconds()),
+		chainDFMax:              cfg.ChainDFMax,
+		chainMaxSize:            cfg.ChainMaxSize,
+		scoreboardURL:           config.ScoreboardBaseURL(),
+		teamID:                  config.TeamID(),
+		gameStart:               parseGameStart(config.GameStart()),
+		gameTick:                time.Duration(config.GameTickDurationSec()) * time.Second,
 	}
 }
 

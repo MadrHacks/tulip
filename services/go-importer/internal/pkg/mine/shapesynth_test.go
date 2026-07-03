@@ -20,7 +20,7 @@ func TestShapeSynthesizesReplayTemplate(t *testing.T) {
 	// the concrete value, so alignment can recover it as a slot.
 	for i, v := range []string{"1041", "2072", "3093"} {
 		u := mkHTTP(0, "GET /api/item?id="+v+" HTTP/1.1\r\nHost: t\r\nUser-Agent: checker\r\n\r\n")
-		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, int64(1000+i))
+		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, 8080, int64(1000+i))
 	}
 	if ss.ShapeCount("svc") != 1 {
 		t.Fatalf("shapes = %d, want 1 (masked value collapses them into one shape)", ss.ShapeCount("svc"))
@@ -70,7 +70,7 @@ func TestShapeTemplateTypesFlagIDSlot(t *testing.T) {
 	}
 	for i, x := range ids {
 		u := mkHTTP(0, "GET /store?id="+x+" HTTP/1.1\r\nHost: t\r\n\r\n")
-		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, int64(1000+i))
+		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, 8080, int64(1000+i))
 	}
 	ss.SynthesizeTemplates(testFlagRe, flagIDs)
 	tpl := ss.ShapeTemplate("svc", ss.Shapes("svc")[0].TemplateID)
@@ -86,8 +86,8 @@ func TestShapeTemplateTypesFlagIDSlot(t *testing.T) {
 // samples gets no template (never a partial one).
 func TestShapeTemplateBelowQuorum(t *testing.T) {
 	ss := NewShapeStore(0)
-	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /a?id=1 HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 1)
-	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /a?id=2 HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 2)
+	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /a?id=1 HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 8080, 1)
+	ss.Observe("svc", []RequestUnit{mkHTTP(0, "GET /a?id=2 HTTP/1.1\r\nHost: t\r\n\r\n")}, []RespFeatures{{}}, false, 8080, 2)
 	if n := ss.SynthesizeTemplates(testFlagRe, nil); n != 0 {
 		t.Fatalf("synthesized %d templates below quorum, want 0", n)
 	}
@@ -102,7 +102,7 @@ func TestShapeReservoirBounded(t *testing.T) {
 	ss := NewShapeStore(0)
 	for i := 0; i < 50; i++ {
 		u := mkHTTP(0, "GET /api/item?id=1000 HTTP/1.1\r\nHost: t\r\n\r\n")
-		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, int64(i))
+		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, 8080, int64(i))
 	}
 	st := ss.shards["svc"].shapes[ss.Shapes("svc")[0].TemplateID]
 	if len(st.samples) != shapeReservoirCap {
@@ -120,7 +120,7 @@ func TestShapeTemplatePersistRoundTrip(t *testing.T) {
 	ss := NewShapeStore(0)
 	for i, v := range []string{"1041", "2072", "3093"} {
 		u := mkHTTP(0, "GET /api/item?id="+v+" HTTP/1.1\r\nHost: t\r\n\r\n")
-		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, int64(1000+i))
+		ss.Observe("svc", []RequestUnit{u}, []RespFeatures{{}}, false, 8080, int64(1000+i))
 	}
 	ss.SynthesizeTemplates(testFlagRe, map[string]bool{})
 	id := ss.Shapes("svc")[0].TemplateID
