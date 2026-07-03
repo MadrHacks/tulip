@@ -37,6 +37,9 @@ autopilot = AutoPilot(
         max_fires_per_step=int(os.environ.get("AUTO_MAX_FIRES_PER_STEP", "10")),
         max_nop_per_step=int(os.environ.get("AUTO_MAX_NOP_PER_STEP", "5")),
         tick_budget=int(os.environ.get("AUTO_TICK_BUDGET", "400")),
+        # OFF by default: automatic offense writes only to NOP; real-team fan-out
+        # is a human action. Set AUTO_FANOUT=true only for full autonomy.
+        auto_fanout=os.environ.get("AUTO_FANOUT", "").lower() in ("1", "true", "yes"),
     ),
     clock=time.time,
 )

@@ -38,6 +38,7 @@ class Clock:
 
 
 def pilot(rep, sploits, teams, clock, **cfg):
+    cfg.setdefault("auto_fanout", True)  # most tests exercise real-team fan-out
     c = AutoConfig(nop_team=0, tick_start=0.0, tick_duration=120.0, **cfg)
     return AutoPilot(rep, candidates(sploits), targets(teams), c, clock)
 
@@ -105,6 +106,16 @@ class TestAutoPilotSafety(unittest.TestCase):
         before = len(rep.fire_calls)
         p.step()
         self.assertEqual(len(rep.fire_calls), before)
+
+    def test_auto_fanout_off_is_nop_only(self):
+        # Default posture: the loop proves at NOP but never writes to a real team.
+        rep = FakeReplicator()
+        p = pilot(rep, ["e1"], [1, 2, 3], Clock(), auto_fanout=False)
+        p.armed = True
+        p.step()
+        self.assertEqual(rep.nop_calls, ["e1"])   # proved at NOP (a NOP write, allowed)
+        self.assertEqual(rep.fire_calls, [])       # nothing fired at real teams
+        self.assertTrue(p.proven.get("e1"))        # surfaced as proven for a human to fan out
 
     def test_nop_failure_not_retried(self):
         rep = FakeReplicator(nop_ok=False)

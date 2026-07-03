@@ -90,7 +90,7 @@ class TestAutopilotKindDispatch(unittest.TestCase):
         cands = lambda: [{"sploit": "e1", "kind": "interactive",
                           "plan": {"steps": [{}]}, "service": "svc", "port": 1}]
         p = AutoPilot(Rep(), cands, lambda: [(1, "10.60.1.1")],
-                      AutoConfig(nop_team=0, tick_start=0.0, tick_duration=120.0), lambda: 0.0)
+                      AutoConfig(nop_team=0, tick_start=0.0, tick_duration=120.0, auto_fanout=True), lambda: 0.0)
         p.armed = True
         p.step()
         self.assertIn(("proof_session", "e1"), calls)

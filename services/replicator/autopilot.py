@@ -33,6 +33,10 @@ class AutoConfig:
     tick_budget: int = 400         # hard cap on fan-out fires per tick
     breaker_window: int = 40       # recent fires considered by the breaker
     breaker_error_ratio: float = 0.5  # trip if this fraction error out
+    # OFF by default: the automatic loop only writes to NOP (detect + nop-prove).
+    # Fanning a proven exploit out to real teams is a human-initiated action.
+    # Flip on only for fully-autonomous offense.
+    auto_fanout: bool = False
 
 
 @dataclass
@@ -86,6 +90,12 @@ class AutoPilot:
             except Exception:
                 self.proven[s] = False
             nop += 1
+
+        # Automatic writes are NOP-only unless auto_fanout is explicitly enabled:
+        # the loop detects and proves at NOP on its own, but fanning a proven
+        # exploit out to real teams stays a human-initiated action.
+        if not self.cfg.auto_fanout:
+            return self._summary(tick, nop, 0)
 
         # 2. Fan out proven exploits — once per (sploit, team, tick), under the
         # per-step cap and the per-tick budget.
