@@ -33,7 +33,7 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 		}
 		for id, c := range store.clusters {
 			if c.flagOut > 0 {
-				saveAttackCandidate(ctx, e.db.Pool(), service, id, c.flagOut, c.n, c.firstSeen)
+				saveAttackCandidate(ctx, e.db.Pool(), service, id, c.flagOut, c.n, c.firstSeen, c.port)
 			}
 		}
 	}
@@ -58,13 +58,13 @@ func loadHeatLoss(ctx context.Context, pool *pgxpool.Pool) map[string]int {
 }
 
 // saveAttackCandidate upserts a detected candidate for the replicator to pick up.
-func saveAttackCandidate(ctx context.Context, pool *pgxpool.Pool, service string, id int64, flagOut, n int, firstSeen int64) {
+func saveAttackCandidate(ctx context.Context, pool *pgxpool.Pool, service string, id int64, flagOut, n int, firstSeen int64, port int) {
 	_, err := pool.Exec(ctx, `
-		INSERT INTO mine.attack_candidate (service, cluster_id, flag_out, n, first_seen)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO mine.attack_candidate (service, cluster_id, flag_out, n, first_seen, port)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (service, cluster_id) DO UPDATE SET
-			flag_out = excluded.flag_out, n = excluded.n, detected_at = now()
-	`, service, id, flagOut, n, firstSeen)
+			flag_out = excluded.flag_out, n = excluded.n, port = excluded.port, detected_at = now()
+	`, service, id, flagOut, n, firstSeen, port)
 	if err != nil {
 		log.Println("minecore: save candidate:", err)
 	}

@@ -171,7 +171,7 @@ func (e *Engine) handle(f *Flow) {
 		store = newClusterStore(e.cfg.MergeThreshold)
 		e.shards[service] = store
 	}
-	id, _ := store.Assign(sig, t, f.FlagsOut > 0)
+	id, _ := store.Assign(sig, t, f.FlagsOut > 0, f.DstPort)
 
 	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
 	tags := []string{clusterTag, e.roleTag(f, service)}

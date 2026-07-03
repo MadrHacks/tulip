@@ -56,6 +56,7 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			flag_out integer NOT NULL,
 			n integer NOT NULL,
 			first_seen bigint NOT NULL,
+			port integer NOT NULL DEFAULT 0,
 			detected_at timestamptz NOT NULL DEFAULT now(),
 			PRIMARY KEY (service, cluster_id)
 		);

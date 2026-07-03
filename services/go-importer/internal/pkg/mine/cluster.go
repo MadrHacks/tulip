@@ -19,6 +19,7 @@ type cluster struct {
 	lastSeen  int64     // newest member's flow time (unix sec), for eviction
 	firstSeen int64     // oldest member's flow time — novelty signal (NAT-robust)
 	flagOut   int       // members that leaked a flag (server->client) — the attack signal
+	port      int       // destination port of the shape — where to replay it
 }
 
 // clusterStore keeps leader clusters indexed by an LSH over their current reps.
@@ -46,7 +47,7 @@ func newClusterStore(threshold float64) *clusterStore {
 // against either its rep or its frozen core), or creates a new one. t is the
 // flow's time, recorded for eviction. Returns the cluster id and whether the
 // cluster was newly created.
-func (cs *clusterStore) Assign(sig MinHash, t int64, hasFlagOut bool) (id int64, isNew bool) {
+func (cs *clusterStore) Assign(sig MinHash, t int64, hasFlagOut bool, port int) (id int64, isNew bool) {
 	bestID := int64(-1)
 	bestJ := 0.0
 	for cid := range cs.lsh.candidates(sig) {
@@ -72,7 +73,7 @@ func (cs *clusterStore) Assign(sig MinHash, t int64, hasFlagOut bool) (id int64,
 	}
 
 	cs.seq++
-	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1, lastSeen: t, firstSeen: t}
+	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1, lastSeen: t, firstSeen: t, port: port}
 	if hasFlagOut {
 		c.flagOut = 1
 	}
