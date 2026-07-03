@@ -10,7 +10,7 @@ func TestMinhashByteRoundtrip(t *testing.T) {
 }
 
 func TestSnapshotRestorePreservesMatching(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 	a, _ := Featurize([]byte("GET /a?id=1 HTTP/1.1\r\nHost: t\r\n\r\n"))
 	b, _ := Featurize([]byte("POST /b/login HTTP/1.1\r\nHost: t\r\n\r\nuser=x"))
 	idA, _ := cs.Assign(a, 1000)
@@ -19,7 +19,7 @@ func TestSnapshotRestorePreservesMatching(t *testing.T) {
 		cs.Assign(a, 1000)
 	}
 
-	restored := restoreClusterStore(cs.snapshot(), 0)
+	restored := restoreClusterStore(cs.snapshot(), 0, 0)
 	if len(restored.clusters) != len(cs.clusters) {
 		t.Fatalf("restored %d clusters, want %d", len(restored.clusters), len(cs.clusters))
 	}

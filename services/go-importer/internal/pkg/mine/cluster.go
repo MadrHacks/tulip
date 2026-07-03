@@ -3,9 +3,9 @@ package mine
 import "sort"
 
 const (
-	tMerge       = 0.82 // min Jaccard to join an existing cluster
-	reservoirCap = 64   // bounded sample per cluster for medoid
-	coreQuorum   = 3    // freeze the identity anchor at this many members
+	defaultMergeThreshold = 0.82 // min Jaccard to join a cluster (overridable)
+	reservoirCap          = 64   // bounded sample per cluster for medoid
+	coreQuorum            = 3    // freeze the identity anchor at this many members
 )
 
 // cluster is a leader-clustering group of MinHash signatures for one service shard.
@@ -21,15 +21,22 @@ type cluster struct {
 
 // clusterStore keeps leader clusters indexed by an LSH over their current reps.
 type clusterStore struct {
-	lsh      *lshIndex
-	clusters map[int64]*cluster
-	seq      int64
+	lsh       *lshIndex
+	clusters  map[int64]*cluster
+	seq       int64
+	threshold float64 // min Jaccard to join a cluster
 }
 
-func newClusterStore() *clusterStore {
+// newClusterStore builds a shard with the given merge threshold; a non-positive
+// value falls back to the default.
+func newClusterStore(threshold float64) *clusterStore {
+	if threshold <= 0 {
+		threshold = defaultMergeThreshold
+	}
 	return &clusterStore{
-		lsh:      newLSHIndex(),
-		clusters: make(map[int64]*cluster),
+		lsh:       newLSHIndex(),
+		clusters:  make(map[int64]*cluster),
+		threshold: threshold,
 	}
 }
 
@@ -51,7 +58,7 @@ func (cs *clusterStore) Assign(sig MinHash, t int64) (id int64, isNew bool) {
 				j = cj
 			}
 		}
-		if j >= tMerge && j > bestJ {
+		if j >= cs.threshold && j > bestJ {
 			bestJ = j
 			bestID = cid
 		}
@@ -185,8 +192,8 @@ func (cs *clusterStore) snapshot() []clusterSnapshot {
 
 // restoreClusterStore rebuilds a shard, skipping clusters last seen before floor
 // so a restart after downtime does not reload long-dead clusters into RAM.
-func restoreClusterStore(snaps []clusterSnapshot, floor int64) *clusterStore {
-	cs := newClusterStore()
+func restoreClusterStore(snaps []clusterSnapshot, floor int64, threshold float64) *clusterStore {
+	cs := newClusterStore(threshold)
 	for _, s := range snaps {
 		if s.lastSeen < floor {
 			continue

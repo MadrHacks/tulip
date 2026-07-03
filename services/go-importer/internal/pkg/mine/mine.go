@@ -161,7 +161,7 @@ func (e *Engine) handle(f *Flow) {
 	service := e.serviceName(f.DstPort)
 	store := e.shards[service]
 	if store == nil {
-		store = newClusterStore()
+		store = newClusterStore(e.cfg.MergeThreshold)
 		e.shards[service] = store
 	}
 	id, _ := store.Assign(sig, t)
@@ -251,7 +251,7 @@ func (e *Engine) loadShards(ctx context.Context) {
 	// not reload long-dead clusters into RAM.
 	floor := time.Now().Unix() - int64(e.cfg.Horizon.Seconds())
 	for service, snaps := range loadClusterSnapshots(ctx, e.db.Pool()) {
-		e.shards[service] = restoreClusterStore(snaps, floor)
+		e.shards[service] = restoreClusterStore(snaps, floor, e.cfg.MergeThreshold)
 	}
 	for service, snaps := range loadCalibratorSnapshots(ctx, e.db.Pool()) {
 		e.calibrators[service] = restoreCalibrator(snaps)

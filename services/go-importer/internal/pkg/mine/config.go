@@ -27,6 +27,11 @@ type Config struct {
 	// (opaque or highly variable traffic) cannot grow memory without bound.
 	MaxClusters int
 
+	// MergeThreshold is the minimum Jaccard for a flow to join an existing
+	// cluster. Lower = looser (fewer, broader clusters); higher = tighter. A
+	// chatty JSON API and a rigid binary protocol want different values.
+	MergeThreshold float64
+
 	// ChainDisable turns off cross-flow chain analysis entirely (a load-shed
 	// switch): no per-flow token extraction, no chain shards.
 	ChainDisable bool
@@ -34,15 +39,28 @@ type Config struct {
 
 func ConfigFromEnv() Config {
 	return Config{
-		Horizon:      envDuration("MINECORE_HORIZON", 20*time.Minute),
-		PollBatch:    envInt("MINECORE_POLL_BATCH", 512),
-		PollInterval: envDuration("MINECORE_POLL_INTERVAL", time.Second),
-		ChainWindow:  envDuration("MINECORE_CHAIN_WINDOW", 2*time.Minute),
-		ChainDFMax:   envInt("MINECORE_CHAIN_DF_MAX", 8),
-		ChainMaxSize: envInt("MINECORE_CHAIN_MAX_SIZE", 16),
-		MaxClusters:  envInt("MINECORE_MAX_CLUSTERS", 4000),
-		ChainDisable: envBool("MINECORE_CHAIN_DISABLE", false),
+		Horizon:        envDuration("MINECORE_HORIZON", 20*time.Minute),
+		PollBatch:      envInt("MINECORE_POLL_BATCH", 512),
+		PollInterval:   envDuration("MINECORE_POLL_INTERVAL", time.Second),
+		ChainWindow:    envDuration("MINECORE_CHAIN_WINDOW", 2*time.Minute),
+		ChainDFMax:     envInt("MINECORE_CHAIN_DF_MAX", 8),
+		ChainMaxSize:   envInt("MINECORE_CHAIN_MAX_SIZE", 16),
+		MaxClusters:    envInt("MINECORE_MAX_CLUSTERS", 4000),
+		ChainDisable:   envBool("MINECORE_CHAIN_DISABLE", false),
+		MergeThreshold: envFloat("MINECORE_MERGE_THRESHOLD", defaultMergeThreshold),
 	}
+}
+
+func envFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		log.Fatalf("minecore: %s: %v", key, err)
+	}
+	return f
 }
 
 func envBool(key string, def bool) bool {

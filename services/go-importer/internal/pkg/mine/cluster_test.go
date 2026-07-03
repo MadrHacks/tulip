@@ -19,7 +19,7 @@ func (cs *clusterStore) coreInfo(id int64) (set bool, core MinHash) {
 }
 
 func TestAssignIdenticalAndDifferent(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 
 	sig := feat("GET /login HTTP/1.1\r\nHost: x\r\n\r\n")
 	id1, new1 := cs.Assign(sig, 1000)
@@ -47,7 +47,7 @@ func TestAssignIdenticalAndDifferent(t *testing.T) {
 }
 
 func TestNearVariantsCollapseToOneCluster(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 
 	// A run of the SAME request must collapse into exactly one cluster; the
 	// first assign creates it, the rest join it. This holds regardless of how
@@ -80,7 +80,7 @@ func TestNearVariantsCollapseToOneCluster(t *testing.T) {
 }
 
 func TestFrozenCoreSetOnceAndStable(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 
 	// Drive identical signatures so they deterministically share one cluster.
 	sig := feat("GET /core HTTP/1.1\r\nHost: target\r\n\r\n")
@@ -114,7 +114,7 @@ func TestFrozenCoreSetOnceAndStable(t *testing.T) {
 }
 
 func TestReservoirBounded(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 
 	// Mix of identical and varied inputs; the invariant must hold for EVERY
 	// cluster regardless of how assignment splits them.
@@ -131,7 +131,7 @@ func TestReservoirBounded(t *testing.T) {
 	}
 
 	// Also confirm boundedness when everything collapses to one cluster.
-	cs2 := newClusterStore()
+	cs2 := newClusterStore(0)
 	sig := feat("GET /same HTTP/1.1\r\nHost: target\r\n\r\n")
 	var id int64
 	for i := 0; i < reservoirCap*5; i++ {
@@ -146,7 +146,7 @@ func TestReservoirBounded(t *testing.T) {
 }
 
 func TestRepStaysIndexedAfterDrift(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 
 	// Repeatedly assign the same signature so a single cluster accumulates
 	// members and its rep is recomputed via medoid each time.
@@ -183,7 +183,7 @@ func distinctSig(seed uint64) MinHash {
 }
 
 func TestClusterEvictStale(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 	id1, _ := cs.Assign(distinctSig(1), 100)
 	id2, _ := cs.Assign(distinctSig(2), 200)
 	if len(cs.clusters) != 2 {
@@ -207,7 +207,7 @@ func TestClusterEvictStale(t *testing.T) {
 }
 
 func TestClusterEvictToCap(t *testing.T) {
-	cs := newClusterStore()
+	cs := newClusterStore(0)
 	for i := 0; i < 10; i++ {
 		cs.Assign(distinctSig(uint64(i)), int64(100+i))
 	}
