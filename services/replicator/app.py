@@ -3,12 +3,16 @@ goes through the Replicator's own safety checks. There is no raw-fire endpoint."
 
 import os
 import dataclasses
+import threading
+import time
 
 from flask import Flask, jsonify, request
 
 from actuate import Replicator
 from autonomy import AuditLog, Level, Decision
-from config import load_config
+from autopilot import AutoPilot, AutoConfig
+from candidates import read_candidates
+from config import load_config, load_auto_params
 from instantiate import target_allowlist
 
 app = Flask(__name__)
@@ -17,6 +21,38 @@ cfg = load_config()
 _ARMED = os.environ.get("REPLICATOR_ARMED", "").lower() in ("1", "true", "yes")
 replicator = Replicator(cfg, armed=_ARMED)
 audit = AuditLog()
+
+# The autonomous loop. It only ever acts when BOTH the replicator is armed (the
+# existing gate — nop_proof/replicate return nothing otherwise, so no exploit
+# proves and nothing fans out) AND auto mode is armed. Both start off.
+_auto = load_auto_params()
+autopilot = AutoPilot(
+    replicator=replicator,
+    candidates_fn=lambda: read_candidates(os.environ.get("TIMESCALE", "")),
+    targets_fn=lambda: target_allowlist(cfg.team_id, cfg.team_count, cfg.ip_format, cfg.nop_team),
+    cfg=AutoConfig(
+        nop_team=cfg.nop_team,
+        tick_start=_auto["tick_start"],
+        tick_duration=_auto["tick_duration"],
+        max_fires_per_step=int(os.environ.get("AUTO_MAX_FIRES_PER_STEP", "10")),
+        max_nop_per_step=int(os.environ.get("AUTO_MAX_NOP_PER_STEP", "5")),
+        tick_budget=int(os.environ.get("AUTO_TICK_BUDGET", "400")),
+    ),
+    clock=time.time,
+)
+
+
+def _auto_loop():
+    interval = float(os.environ.get("AUTO_STEP_INTERVAL", "3"))
+    while True:
+        try:
+            autopilot.step()
+        except Exception as exc:  # never let the loop die
+            app.logger.warning("autopilot step: %s", exc)
+        time.sleep(interval)
+
+
+threading.Thread(target=_auto_loop, daemon=True).start()
 
 
 @app.get("/status")
@@ -166,6 +202,40 @@ def chain_fanout():
         )
         return jsonify(error=str(exc)), 400
     return jsonify(results=results)
+
+
+@app.post("/auto_arm")
+def auto_arm():
+    autopilot.armed = True
+    autopilot.tripped = False  # arming clears a prior breaker trip
+    audit.record(
+        capability="offense", action="auto_arm", level=Level.AUTO,
+        decision=Decision(allow=True, require_human=False, reason="human-initiated"),
+        subject="",
+    )
+    return jsonify(auto_armed=autopilot.armed, replicator_armed=replicator.armed)
+
+
+@app.post("/auto_disarm")
+def auto_disarm():
+    autopilot.armed = False
+    audit.record(
+        capability="offense", action="auto_disarm", level=Level.MANUAL,
+        decision=Decision(allow=True, require_human=False, reason="human-initiated"),
+        subject="",
+    )
+    return jsonify(auto_armed=autopilot.armed)
+
+
+@app.get("/auto_status")
+def auto_status():
+    return jsonify(
+        auto_armed=autopilot.armed,
+        replicator_armed=replicator.armed,
+        tripped=autopilot.tripped,
+        tick=autopilot.current_tick(),
+        proven=[s for s, ok in autopilot.proven.items() if ok],
+    )
 
 
 @app.get("/audit")
