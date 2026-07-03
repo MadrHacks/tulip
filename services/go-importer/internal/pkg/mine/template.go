@@ -3,6 +3,7 @@ package mine
 import (
 	"bytes"
 	"regexp"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -36,6 +37,26 @@ func (s SlotType) String() string {
 // MarshalJSON encodes a slot type as its name.
 func (s SlotType) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
+}
+
+// UnmarshalJSON decodes a slot type from the name MarshalJSON emits, so a
+// persisted template (e.g. a shape's replay template in template_body) round-
+// trips back into Go. Unknown/empty names decode to SlotUnknown.
+func (s *SlotType) UnmarshalJSON(b []byte) error {
+	name := strings.Trim(string(b), `"`)
+	switch name {
+	case "const":
+		*s = SlotConst
+	case "flag":
+		*s = SlotFlag
+	case "flagid":
+		*s = SlotFlagID
+	case "random":
+		*s = SlotRandom
+	default:
+		*s = SlotUnknown
+	}
+	return nil
 }
 
 // extractSlotValues returns member's bytes in each variable slot of the

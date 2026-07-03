@@ -17,7 +17,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"go-importer/internal/pkg/mine"
@@ -231,7 +234,94 @@ func main() {
 	// the flag_present oracle vs official flag_out, at the FLOW level.
 	reportOracle(flows, units)
 
+	// Replay templates: synthesize the per-shape replay template (align.go
+	// multiple-alignment over each shape's raw-sample reservoir + slot-typing)
+	// and print the structure for the top flag_present shapes. This dataset
+	// carries no live flagId set, so flagId positions type as random/unknown —
+	// but the sanity check is that the VARYING positions land in Var slots while
+	// the skeleton (endpoint/method) stays Const.
+	flagRe := regexp.MustCompile(`[A-Z0-9]{31}=`)
+	store.SynthesizeTemplates(flagRe, map[string]bool{})
+	reportTemplates(store)
+
 	_ = shapeTemplate
+}
+
+// reportTemplates prints the synthesized replay template for the top few
+// flag_present shapes per service: the grouping skeleton alongside the aligned
+// Const/Var structure, so the flagId/random positions (Var slots) can be eyeballed
+// against the constant endpoint anchors.
+func reportTemplates(store *mine.ShapeStore) {
+	fmt.Println("\nsynthesized replay templates (top flag_present shapes per service):")
+	for _, svc := range services {
+		shapes := store.Shapes(svc)
+		sort.Slice(shapes, func(i, j int) bool {
+			if shapes[i].Signals.FlagPresent != shapes[j].Signals.FlagPresent {
+				return shapes[i].Signals.FlagPresent > shapes[j].Signals.FlagPresent
+			}
+			return shapes[i].Members > shapes[j].Members
+		})
+		shown := 0
+		for _, sh := range shapes {
+			if sh.Signals.FlagPresent == 0 {
+				break
+			}
+			tpl := store.ShapeTemplate(svc, sh.TemplateID)
+			if tpl == nil {
+				continue
+			}
+			fmt.Printf("  [%s shape %d] members=%d flag_present=%d segs=%d slots=%d\n",
+				svc, sh.TemplateID, sh.Members, sh.Signals.FlagPresent, len(tpl.Segments), len(tpl.Slots))
+			fmt.Printf("    skeleton: %s\n", sh.Template)
+			fmt.Printf("    template: %s\n", renderTemplate(tpl))
+			shown++
+			if shown >= 3 {
+				break
+			}
+		}
+		if shown == 0 {
+			fmt.Printf("  [%s] no templated flag_present shapes (below quorum or no shared structure)\n", svc)
+		}
+	}
+}
+
+// renderTemplate renders an aligned template as inline text: Const segments as
+// quoted previews, Var segments as <VAR#i type charclass len=lo-hi> markers.
+func renderTemplate(tpl *mine.Template) string {
+	var b strings.Builder
+	slot := 0
+	for _, s := range tpl.Segments {
+		if s.Var {
+			if slot < len(tpl.Slots) {
+				sl := tpl.Slots[slot]
+				b.WriteString("<VAR#" + strconv.Itoa(slot) + " " + sl.Type.String())
+				if sl.Charclass != "" {
+					b.WriteString(" " + sl.Charclass)
+				}
+				b.WriteString(" len=" + strconv.Itoa(sl.MinLen) + "-" + strconv.Itoa(sl.MaxLen) + ">")
+			} else {
+				b.WriteString("<VAR>")
+			}
+			slot++
+			continue
+		}
+		b.WriteString(previewConst(s.Const))
+	}
+	return b.String()
+}
+
+// previewConst renders constant bytes as a short, whitespace-escaped quoted
+// preview so a template line stays readable.
+func previewConst(c []byte) string {
+	const max = 48
+	s := string(c)
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	return "«" + s + "»"
 }
 
 func reportGrouping(name string, units []unitRow, id func(unitRow) int) {

@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 )
@@ -23,12 +24,50 @@ import (
 
 const defaultMaxShapes = 4096 // per-service shape cap
 
+// Per-shape replay-template substrate. Each shape keeps a small bounded
+// reservoir of RAW request-unit byte samples so its replay template can be
+// synthesized by multiple-alignment (align.go) without a DB re-fetch — the
+// streaming counterpart of the cluster path, which re-reads member bytes from
+// Timescale. Only a handful of (size-capped) samples live per shape, so the
+// memory stays bounded: <= shapeReservoirCap * shapeSampleCap per shape.
+const (
+	shapeReservoirCap = 8               // raw-unit samples kept per shape for alignment
+	shapeSampleCap    = maxFeatureBytes // truncate each stored sample (8 KB captures a request's shape)
+)
+
 // shapeState is a live shape: the neutral Shape plus streaming bookkeeping
-// (seen times) the pure Shape deliberately omits.
+// (seen times, the alignment reservoir, and the synthesized replay template)
+// the pure Shape deliberately omits.
 type shapeState struct {
 	shape     Shape
 	firstSeen int64
 	lastSeen  int64
+	// samples is the bounded reservoir of raw request-unit bytes (<= cap),
+	// reservoir-sampled as Observe sees members. NOT the skeleton — the raw
+	// bytes, so synthesis can align on the real (canonical) request and recover
+	// its variable slots. Not persisted; re-accumulates at runtime after a restart.
+	samples [][]byte
+	// template is the synthesized REPLAY template (aligned Const/Var segments +
+	// typed slots), nil until the shape reaches quorum. Persisted as the
+	// template_body jsonb column so it survives a restart until re-synthesized.
+	template *Template
+}
+
+// observeSample folds one raw request-unit sample into the shape's bounded
+// reservoir, mirroring clusterStore.addMember's deterministic (randomness-free)
+// reservoir: append until full, then overwrite a slot chosen by the member
+// count. Each sample is size-capped and copied so the reservoir never aliases or
+// retains large payloads. Members must already be incremented for this member.
+func (st *shapeState) observeSample(raw []byte) {
+	if len(raw) > shapeSampleCap {
+		raw = raw[:shapeSampleCap]
+	}
+	cp := append([]byte(nil), raw...)
+	if len(st.samples) < shapeReservoirCap {
+		st.samples = append(st.samples, cp)
+		return
+	}
+	st.samples[st.shape.Members%shapeReservoirCap] = cp
 }
 
 // shapeShard is one service's streaming shape state: a Drain miner, the shapes
@@ -129,6 +168,10 @@ func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespF
 		if t < st.firstSeen {
 			st.firstSeen = t
 		}
+		// Keep a bounded reservoir of the RAW unit bytes (not the skeleton) for
+		// replay-template synthesis. Members was just incremented above, so it is
+		// the running member count used for the deterministic reservoir slot.
+		st.observeSample(u.Client)
 		ids = append(ids, id)
 	}
 
@@ -199,7 +242,8 @@ func (ss *ShapeStore) EvictToCap() map[string][]int {
 
 // shapeSnapshot is a shape's durable form: the Drain template (which also re-
 // seeds the miner's prefix tree on restore, so shape ids stay stable) plus the
-// aggregated signal vector and seen times.
+// aggregated signal vector, seen times, and the synthesized replay template
+// (TemplateBody: the {segments,slots} json, nil until the shape reaches quorum).
 type shapeSnapshot struct {
 	ShapeID       int
 	Template      string
@@ -210,6 +254,7 @@ type shapeSnapshot struct {
 	Actors        map[string]int
 	FirstSeen     int64
 	LastSeen      int64
+	TemplateBody  []byte // marshaled *Template (replay template), or nil
 }
 
 // snapshot returns every shard's shapes as durable snapshots, keyed by service.
@@ -228,6 +273,7 @@ func (ss *ShapeStore) snapshot() map[string][]shapeSnapshot {
 				Actors:        copyActors(st.shape.Signals.Actors),
 				FirstSeen:     st.firstSeen,
 				LastSeen:      st.lastSeen,
+				TemplateBody:  st.templateBody(),
 			})
 		}
 		out[svc] = snaps
@@ -247,7 +293,7 @@ func restoreShapeStore(snaps map[string][]shapeSnapshot, maxShapes int) *ShapeSt
 		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ShapeID < ordered[j].ShapeID })
 		for _, s := range ordered {
 			sh.drain.reinsert(s.ShapeID, strings.Fields(s.Template), s.Members)
-			sh.shapes[s.ShapeID] = &shapeState{
+			st := &shapeState{
 				shape: Shape{
 					TemplateID: s.ShapeID,
 					Template:   s.Template,
@@ -262,6 +308,16 @@ func restoreShapeStore(snaps map[string][]shapeSnapshot, maxShapes int) *ShapeSt
 				firstSeen: s.FirstSeen,
 				lastSeen:  s.LastSeen,
 			}
+			// Reload the persisted replay template so it is available before the
+			// reservoir re-accumulates and re-synthesizes it (samples themselves
+			// are not persisted).
+			if len(s.TemplateBody) > 0 {
+				var tpl Template
+				if err := json.Unmarshal(s.TemplateBody, &tpl); err == nil {
+					st.template = &tpl
+				}
+			}
+			sh.shapes[s.ShapeID] = st
 		}
 	}
 	return ss

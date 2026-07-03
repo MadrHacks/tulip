@@ -57,6 +57,11 @@ func (e *Engine) shapeTags(f *Flow, service string, t int64) []string {
 // evicted rows) and persists the survivors to mine.shape — the shape-side twin
 // of the cluster snapshot/eviction in maybeSnapshot.
 func (e *Engine) snapshotShapes(ctx context.Context) {
+	// Give settled shapes their REPLAY template before persisting: multiple-align
+	// each shape's reservoir of raw samples into typed Const/Var slots (reuses the
+	// cluster path's synthesize + slot-typing). The resulting {segments,slots}
+	// body then rides the snapshot into mine.shape.template_body.
+	e.shapeStore.SynthesizeTemplates(e.flagRe, e.flagIDSet())
 	for service, ids := range e.shapeStore.EvictToCap() {
 		deleteShapes(ctx, e.db.Pool(), service, ids)
 	}
