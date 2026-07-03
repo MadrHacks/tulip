@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import re
 import uuid
 from contextlib import contextmanager
@@ -19,6 +20,13 @@ from psycopg.rows import class_row, dict_row
 
 import configurations
 from json_util import JsonFactory
+
+# Only surface RECURRING shapes in the cockpit: a cluster must have at least
+# MIN_SHAPE_SIZE members (mine.cluster.n) to appear in the Clusters view or as an
+# attack candidate. This is purely an API-side surfacing filter — singletons are
+# still clustered and tagged in the DB by minecore; the deeper fix is the pending
+# clustering redesign. Overridable via the MIN_SHAPE_SIZE env var (default 5).
+MIN_SHAPE_SIZE = int(os.environ.get("MIN_SHAPE_SIZE", "5"))
 
 
 @dataclass(slots=True, kw_only=True)
@@ -324,6 +332,7 @@ class Connection(psycopg.Connection):
 
         with self.cursor(row_factory=dict_row) as cursor:
             rows = cursor.execute(sql_query, parameters).fetchall()
+            recurring = self._recurring_clusters(cursor)
 
         result = []
         for row in rows:
@@ -333,6 +342,11 @@ class Connection(psycopg.Connection):
             try:
                 cluster_id = int(parts[2])
             except ValueError:
+                continue
+            # Surface only recurring shapes (n >= MIN_SHAPE_SIZE). recurring is
+            # None only when mine.cluster is absent, in which case we do not
+            # filter (nothing has been mined yet).
+            if recurring is not None and (parts[1], cluster_id) not in recurring:
                 continue
             result.append(
                 {
@@ -346,6 +360,20 @@ class Connection(psycopg.Connection):
             )
         result.sort(key=lambda x: x["count"], reverse=True)
         return result
+
+    def _recurring_clusters(self, cursor) -> set[tuple[str, int]] | None:
+        """Set of (service, id) clusters with n >= MIN_SHAPE_SIZE members.
+
+        Returns None when mine.cluster does not exist yet (nothing mined), which
+        callers treat as "do not filter".
+        """
+        if cursor.execute("SELECT to_regclass('mine.cluster') AS t").fetchone()["t"] is None:
+            return None
+        rows = cursor.execute(
+            "SELECT service, id FROM mine.cluster WHERE n >= %(min_shape)s",
+            {"min_shape": MIN_SHAPE_SIZE},
+        ).fetchall()
+        return {(r["service"], r["id"]) for r in rows}
 
     def cluster_templates(self) -> list[dict]:
         with self.cursor(row_factory=dict_row) as cursor:
@@ -446,10 +474,14 @@ class Connection(psycopg.Connection):
                 SELECT ac.service, ac.cluster_id, ac.flag_out, ac.n, ac.port, ac.detected_at,
                        (t.cluster_id IS NOT NULL) AS runnable
                 FROM mine.attack_candidate ac
+                JOIN mine.cluster c
+                  ON c.service = ac.service AND c.id = ac.cluster_id
                 LEFT JOIN mine.template t
                   ON t.service = ac.service AND t.cluster_id = ac.cluster_id
+                WHERE c.n >= %(min_shape)s
                 ORDER BY ac.flag_out DESC
-                """
+                """,
+                {"min_shape": MIN_SHAPE_SIZE},
             ).fetchall()
         return [
             {

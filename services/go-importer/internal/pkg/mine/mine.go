@@ -179,7 +179,10 @@ func (e *Engine) handle(f *Flow) {
 	id, _ := store.Assign(sig, t, f.FlagsOut > 0, f.DstPort)
 
 	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
-	tags := []string{clusterTag, e.roleTag(f, service)}
+	// role:* tags are intentionally not emitted: under NAT the checker/exploit
+	// calibration is a wrong-category signal (pure cockpit noise). The calibrator
+	// plumbing (roleTag/calibrators) is retained pending a larger rework.
+	tags := []string{clusterTag}
 	// A fresh flow matching a cluster the operator already judged inherits that
 	// verdict immediately, in the same write — no periodic bulk propagation.
 	if sugg := e.verdicts[clusterTag]; sugg != "" {
