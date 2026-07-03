@@ -154,6 +154,69 @@ func (db *Database) flowDirectionData(flowId uuid.UUID, direction string) ([]byt
 	return topmost(chunks), nil
 }
 
+// Turn is one side's contiguous bytes in an interactive conversation: the merged
+// run of same-direction raw chunks. A flow's turns alternate client/server in
+// arrival order, reconstructing the back-and-forth of a single-connection
+// session for interactive-replay synthesis.
+type Turn struct {
+	FromClient bool
+	Data       []byte
+}
+
+// FlowTurns returns a flow's verbatim (raw-kind) bytes grouped into alternating
+// conversation turns: consecutive same-direction chunks are merged into one
+// Turn, in id (arrival) order. Interactive replay reproduces the exact wire
+// bytes, so this reads the raw representation rather than the decoded topmost
+// layer. Bounds the scan by the flow's id window, mirroring FlowAnalysisData.
+func (db *Database) FlowTurns(flowId uuid.UUID) ([]Turn, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT direction, data FROM flow_item
+		WHERE flow_id = $1 AND kind = 'raw'
+			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
+			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
+		ORDER BY id
+	`, flowId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []rawChunk
+	for rows.Next() {
+		var dir string
+		var data []byte
+		if err := rows.Scan(&dir, &data); err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, rawChunk{fromClient: dir == "c", data: data})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return groupTurns(chunks), nil
+}
+
+// rawChunk is one direction-tagged raw flow_item, in id (arrival) order.
+type rawChunk struct {
+	fromClient bool
+	data       []byte
+}
+
+// groupTurns merges consecutive same-direction chunks into alternating turns,
+// so a flow's chunk stream becomes the ordered back-and-forth of a conversation.
+// Each turn owns a fresh copy of its bytes (never aliasing the row buffers).
+func groupTurns(chunks []rawChunk) []Turn {
+	var turns []Turn
+	for _, ch := range chunks {
+		if n := len(turns); n > 0 && turns[n-1].FromClient == ch.fromClient {
+			turns[n-1].Data = append(turns[n-1].Data, ch.data...)
+		} else {
+			turns = append(turns, Turn{FromClient: ch.fromClient, Data: append([]byte(nil), ch.data...)})
+		}
+	}
+	return turns
+}
+
 // ClusterMemberData returns the client plaintext of up to limit recent flows
 // carrying the given tag (e.g. "cluster:CCalendar:7"), within the horizon.
 func (db *Database) ClusterMemberData(tag string, horizonSecs float64, limit int) ([][]byte, error) {

@@ -42,6 +42,13 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			body jsonb NOT NULL,
 			updated_at timestamptz NOT NULL DEFAULT now()
 		);
+		CREATE TABLE IF NOT EXISTS mine.interactive_template (
+			service text NOT NULL,
+			cluster_id bigint NOT NULL,
+			plan jsonb NOT NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (service, cluster_id)
+		);
 		CREATE TABLE IF NOT EXISTS mine.heat (
 			service text PRIMARY KEY,
 			our_lost integer NOT NULL,

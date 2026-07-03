@@ -35,6 +35,9 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 		for id, c := range store.clusters {
 			if c.flagOut > 0 {
 				saveAttackCandidate(ctx, e.db.Pool(), service, id, c.flagOut, c.n, c.firstSeen, c.port)
+				// A genuinely multi-turn candidate also gets an interactive session
+				// plan (once per cluster); single-turn ones stay single-flow.
+				e.maybeSynthInteractive(ctx, service, id, c.port)
 			}
 		}
 	}
