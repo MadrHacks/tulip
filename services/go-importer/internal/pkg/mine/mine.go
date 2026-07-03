@@ -45,7 +45,8 @@ type Engine struct {
 	lastPropagateAt time.Time
 	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
 
-	dataClock int64 // newest flow time seen (unix sec), drives eviction
+	dataClock    int64 // newest flow time seen (unix sec), drives eviction
+	lastDetectAt time.Time
 
 	chains           map[string]*chainAnalyzer // per service
 	chainClusters    *chainClusterStore        // shared id allocator
@@ -127,6 +128,7 @@ func (e *Engine) Run(ctx context.Context) {
 		e.maybeSynthesize(ctx)
 		e.maybePropagate(ctx)
 		e.maybeChainSynthesize(ctx)
+		e.maybeDetect(ctx)
 
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.
@@ -169,7 +171,7 @@ func (e *Engine) handle(f *Flow) {
 		store = newClusterStore(e.cfg.MergeThreshold)
 		e.shards[service] = store
 	}
-	id, _ := store.Assign(sig, t)
+	id, _ := store.Assign(sig, t, f.FlagsOut > 0)
 
 	clusterTag := fmt.Sprintf("cluster:%s:%d", service, id)
 	tags := []string{clusterTag, e.roleTag(f, service)}

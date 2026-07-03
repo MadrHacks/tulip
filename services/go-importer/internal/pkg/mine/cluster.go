@@ -17,6 +17,8 @@ type cluster struct {
 	reservoir []MinHash // bounded sample (<= reservoirCap)
 	n         int       // total members ever assigned
 	lastSeen  int64     // newest member's flow time (unix sec), for eviction
+	firstSeen int64     // oldest member's flow time — novelty signal (NAT-robust)
+	flagOut   int       // members that leaked a flag (server->client) — the attack signal
 }
 
 // clusterStore keeps leader clusters indexed by an LSH over their current reps.
@@ -44,7 +46,7 @@ func newClusterStore(threshold float64) *clusterStore {
 // against either its rep or its frozen core), or creates a new one. t is the
 // flow's time, recorded for eviction. Returns the cluster id and whether the
 // cluster was newly created.
-func (cs *clusterStore) Assign(sig MinHash, t int64) (id int64, isNew bool) {
+func (cs *clusterStore) Assign(sig MinHash, t int64, hasFlagOut bool) (id int64, isNew bool) {
 	bestID := int64(-1)
 	bestJ := 0.0
 	for cid := range cs.lsh.candidates(sig) {
@@ -65,12 +67,15 @@ func (cs *clusterStore) Assign(sig MinHash, t int64) (id int64, isNew bool) {
 	}
 
 	if bestID >= 0 {
-		cs.addMember(cs.clusters[bestID], sig, t)
+		cs.addMember(cs.clusters[bestID], sig, t, hasFlagOut)
 		return bestID, false
 	}
 
 	cs.seq++
-	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1, lastSeen: t}
+	c := &cluster{id: cs.seq, rep: sig, reservoir: []MinHash{sig}, n: 1, lastSeen: t, firstSeen: t}
+	if hasFlagOut {
+		c.flagOut = 1
+	}
 	cs.clusters[cs.seq] = c
 	cs.lsh.add(sig, cs.seq)
 	return cs.seq, true
@@ -78,10 +83,13 @@ func (cs *clusterStore) Assign(sig MinHash, t int64) (id int64, isNew bool) {
 
 // addMember folds sig into c, updates the bounded reservoir and medoid rep, and
 // freezes the identity core once the quorum is reached.
-func (cs *clusterStore) addMember(c *cluster, sig MinHash, t int64) {
+func (cs *clusterStore) addMember(c *cluster, sig MinHash, t int64, hasFlagOut bool) {
 	c.n++
 	if t > c.lastSeen {
 		c.lastSeen = t
+	}
+	if hasFlagOut {
+		c.flagOut++
 	}
 
 	full := len(c.reservoir) >= reservoirCap

@@ -50,6 +50,15 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			our_sla_ok boolean NOT NULL,
 			updated_at timestamptz NOT NULL DEFAULT now()
 		);
+		CREATE TABLE IF NOT EXISTS mine.attack_candidate (
+			service text NOT NULL,
+			cluster_id bigint NOT NULL,
+			flag_out integer NOT NULL,
+			n integer NOT NULL,
+			first_seen bigint NOT NULL,
+			detected_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (service, cluster_id)
+		);
 		CREATE TABLE IF NOT EXISTS mine.calibrator (
 			service text NOT NULL,
 			source text NOT NULL,
