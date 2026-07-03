@@ -82,11 +82,7 @@ class AutoPilot:
             if s in self.proven:
                 continue
             try:
-                res = self.replicator.nop_proof(
-                    template=c["template"], sploit=s,
-                    service=c["service"], port=c["port"], nop_team=self.cfg.nop_team,
-                )
-                self.proven[s] = bool(res)
+                self.proven[s] = bool(self._proof(c))
             except Exception:
                 self.proven[s] = False
             nop += 1
@@ -115,11 +111,37 @@ class AutoPilot:
                 self._tick_fires[tick] = self._tick_fires.get(tick, 0) + 1
                 fired += 1
                 try:
-                    self.replicator.replicate(c["template"], s, c["service"], c["port"], team)
+                    self._fire(c, team)
                     self._record(True)
                 except Exception:
                     self._record(False)
         return self._summary(tick, nop, fired)
+
+    def _proof(self, c) -> list:
+        """NOP-proof a candidate by its kind; returns the captured flags list.
+        Single-flow templates return a flags list; interactive/chain replays
+        return a dict — normalize both to a list."""
+        kind = c.get("kind", "template")
+        if kind == "interactive":
+            r = self.replicator.nop_proof_session(c["plan"], c["sploit"], self.cfg.nop_team)
+        elif kind == "chain":
+            r = self.replicator.nop_proof_chain(c["plan"], c["sploit"], self.cfg.nop_team)
+        else:
+            r = self.replicator.nop_proof(
+                template=c["template"], sploit=c["sploit"],
+                service=c["service"], port=c["port"], nop_team=self.cfg.nop_team,
+            )
+        return r.get("flags", []) if isinstance(r, dict) else (r or [])
+
+    def _fire(self, c, team):
+        """Fan a proven candidate out to one team, by its kind. The replicator
+        re-checks the NOP-proven + allowlist gates on every call."""
+        kind = c.get("kind", "template")
+        if kind == "interactive":
+            return self.replicator.replay_session(c["plan"], c["sploit"], team)
+        if kind == "chain":
+            return self.replicator.replay(c["plan"], c["sploit"], team)
+        return self.replicator.replicate(c["template"], c["sploit"], c["service"], c["port"], team)
 
     def _summary(self, tick, nop, fired):
         return {
