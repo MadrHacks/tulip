@@ -9,13 +9,19 @@ func tokenByte(c byte) bool {
 	return isAlnumByte(c) || c == '_' || c == '-' || c == '.'
 }
 
+// maxTokensPerFlow caps the distinct high-entropy tokens taken from one flow.
+// A real flow carries a handful of secrets; the cap is a safety valve so a
+// binary or still-encoded response (one no decoder handled) cannot flood the
+// value-dataflow graph with false high-entropy runs.
+const maxTokensPerFlow = 64
+
 // ExtractTokens splits data into maximal token runs and returns the distinct
-// high-entropy tokens among them, in first-seen order. It is the producer and
-// consumer feed for the value-dataflow graph.
+// high-entropy tokens among them, in first-seen order (capped). It is the
+// producer and consumer feed for the value-dataflow graph.
 func ExtractTokens(data []byte) [][]byte {
 	var out [][]byte
 	seen := make(map[uint64]struct{})
-	for i := 0; i < len(data); {
+	for i := 0; i < len(data) && len(out) < maxTokensPerFlow; {
 		if !tokenByte(data[i]) {
 			i++
 			continue

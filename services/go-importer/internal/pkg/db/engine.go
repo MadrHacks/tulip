@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,81 +22,136 @@ func (db *Database) AppendDerivedItems(flowId uuid.UUID, items []FlowItem) {
 	db.batcherFlowIndex.PushAll(buildIndexRows(flowId, items))
 }
 
-// FlowClientData returns a flow's client->server plaintext for analysis: the
-// decrypted items when present, else the raw reassembled items, concatenated in
-// conversation order. Derived representations are excluded.
-func (db *Database) FlowClientData(flowId uuid.UUID) ([]byte, error) {
-	rows, err := db.pool.Query(context.Background(), `
-		SELECT kind, data FROM flow_item
-		WHERE flow_id = $1 AND direction = 'c' AND kind IN ('raw', 'decrypted')
-			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
-			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
-		ORDER BY id
-	`, flowId)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var raw, dec []byte
-	for rows.Next() {
-		var kind string
-		var data []byte
-		if err := rows.Scan(&kind, &data); err != nil {
-			return nil, err
-		}
-		if kind == RawKind {
-			raw = append(raw, data...)
-		} else {
-			dec = append(dec, data...)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(dec) > 0 {
-		return dec, nil
-	}
-	return raw, nil
+// kindChunk is one flow_item's kind and bytes, kept in conversation (id) order.
+type kindChunk struct {
+	kind string
+	data []byte
 }
 
-// FlowServerData returns a flow's server->client plaintext for analysis: the
-// decrypted items when present, else the raw reassembled items, concatenated in
-// conversation order. These are the values a service hands out (tokens, ids),
-// the producer side of cross-flow dataflow. Derived representations are excluded.
-func (db *Database) FlowServerData(flowId uuid.UUID) ([]byte, error) {
+// topmost returns the bytes of the single most-decoded representation among
+// chunks, concatenated in arrival order. Tulip layers representations as a base
+// kind ("raw" / "decrypted") plus converter chains named "<parent> -> <conv>"
+// (e.g. "raw -> b64decode", "decrypted -> websockets -> b64decode"). The most
+// decoded layer is the deepest such chain, preferring a decrypted root over a
+// raw one. Choosing by this generic rule means any decoder — TLS, base64,
+// websockets, or one a user wires up mid-game — feeds analysis with no change
+// here. Returns nil when there are no chunks.
+func topmost(chunks []kindChunk) []byte {
+	best := ""
+	for _, c := range chunks {
+		if best == "" || lessDecoded(best, c.kind) {
+			best = c.kind
+		}
+	}
+	if best == "" {
+		return nil
+	}
+	var out []byte
+	for _, c := range chunks {
+		if c.kind == best {
+			out = append(out, c.data...)
+		}
+	}
+	return out
+}
+
+// lessDecoded reports whether kind a is a lower-priority (less decoded)
+// representation than b: fewer converter stages, or a raw root vs a decrypted
+// one. Ties break on the kind string for determinism.
+func lessDecoded(a, b string) bool {
+	ra, rb := decodeRank(a), decodeRank(b)
+	if ra[0] != rb[0] {
+		return ra[0] < rb[0]
+	}
+	if ra[1] != rb[1] {
+		return ra[1] < rb[1]
+	}
+	return a < b
+}
+
+// decodeRank scores a kind as {decrypted-root, converter-depth}.
+func decodeRank(kind string) [2]int {
+	root := 0
+	if strings.HasPrefix(kind, "decrypted") {
+		root = 1
+	}
+	return [2]int{root, strings.Count(kind, " -> ")}
+}
+
+// FlowAnalysisData returns the most-decoded representation of a flow's
+// client->server and server->client bytes in one query, halving the per-flow
+// reads on the analysis hot path. See topmost for how the layer is chosen.
+func (db *Database) FlowAnalysisData(flowId uuid.UUID) (client, server []byte, err error) {
 	rows, err := db.pool.Query(context.Background(), `
-		SELECT kind, data FROM flow_item
-		WHERE flow_id = $1 AND direction = 's' AND kind IN ('raw', 'decrypted')
+		SELECT direction, kind, data FROM flow_item
+		WHERE flow_id = $1
 			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
 			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
 		ORDER BY id
 	`, flowId)
 	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var c, s []kindChunk
+	for rows.Next() {
+		var dir, kind string
+		var data []byte
+		if err := rows.Scan(&dir, &kind, &data); err != nil {
+			return nil, nil, err
+		}
+		switch dir {
+		case "c":
+			c = append(c, kindChunk{kind, data})
+		case "s":
+			s = append(s, kindChunk{kind, data})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return topmost(c), topmost(s), nil
+}
+
+// FlowClientData returns the most-decoded client->server bytes of a flow.
+func (db *Database) FlowClientData(flowId uuid.UUID) ([]byte, error) {
+	return db.flowDirectionData(flowId, "c")
+}
+
+// FlowServerData returns the most-decoded server->client bytes of a flow — the
+// values a service hands out (tokens, ids), the producer side of cross-flow
+// dataflow.
+func (db *Database) FlowServerData(flowId uuid.UUID) ([]byte, error) {
+	return db.flowDirectionData(flowId, "s")
+}
+
+func (db *Database) flowDirectionData(flowId uuid.UUID, direction string) ([]byte, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT kind, data FROM flow_item
+		WHERE flow_id = $1 AND direction = $2
+			AND id > fid_pack_low((SELECT time FROM flow WHERE id = $1))
+			AND id < fid_pack_high((SELECT time + duration FROM flow WHERE id = $1))
+		ORDER BY id
+	`, flowId, direction)
+	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var raw, dec []byte
+	var chunks []kindChunk
 	for rows.Next() {
 		var kind string
 		var data []byte
 		if err := rows.Scan(&kind, &data); err != nil {
 			return nil, err
 		}
-		if kind == RawKind {
-			raw = append(raw, data...)
-		} else {
-			dec = append(dec, data...)
-		}
+		chunks = append(chunks, kindChunk{kind, data})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if len(dec) > 0 {
-		return dec, nil
-	}
-	return raw, nil
+	return topmost(chunks), nil
 }
 
 // ClusterMemberData returns the client plaintext of up to limit recent flows

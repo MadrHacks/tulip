@@ -131,18 +131,21 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// handle clusters one flow and tags it with its cluster identity.
+// handle clusters one flow and tags it with its cluster identity. It fetches the
+// flow's most-decoded bytes for both directions in a single query, so clustering
+// and chain analysis both run on the topmost representation (TLS-decrypted,
+// base64-decoded, or whatever the flow's deepest decoder produced).
 func (e *Engine) handle(f *Flow) {
-	data, err := e.db.FlowClientData(f.Id)
+	client, server, err := e.db.FlowAnalysisData(f.Id)
 	if err != nil {
-		log.Println("minecore: client data:", err)
+		log.Println("minecore: flow data:", err)
 		return
 	}
-	if len(data) == 0 {
+	if len(client) == 0 {
 		return
 	}
 
-	canon := Normalize(data, e.flagRe, e.flagIDs)
+	canon := Normalize(client, e.flagRe, e.flagIDs)
 	sig, _ := Featurize(canon)
 
 	service := e.serviceName(f.DstPort)
@@ -156,7 +159,7 @@ func (e *Engine) handle(f *Flow) {
 	tag := fmt.Sprintf("cluster:%s:%d", service, id)
 	e.db.FlowAddTags(f.Id, []string{tag})
 	e.tagRole(f, service)
-	e.observeChain(f, service, tag, data)
+	e.observeChain(f, service, tag, client, server)
 }
 
 // chainShard returns the per-service chain analyzer, creating it on first use.
@@ -174,12 +177,7 @@ func (e *Engine) chainShard(service string) *chainAnalyzer {
 // observeChain feeds the flow's high-entropy tokens into its service's chain
 // analyzer: values the service hands out (server->client) as producers, values
 // the client sends as consumers. Cross-flow reuse of a value links the two flows.
-func (e *Engine) observeChain(f *Flow, service, clusterTag string, clientData []byte) {
-	serverData, err := e.db.FlowServerData(f.Id)
-	if err != nil {
-		log.Println("minecore: server data:", err)
-		return
-	}
+func (e *Engine) observeChain(f *Flow, service, clusterTag string, clientData, serverData []byte) {
 	e.chainShard(service).Observe(
 		f.Id.String(), f.Time.Unix(), f.DstPort, clusterTag,
 		ExtractTokens(serverData), ExtractTokens(clientData),
