@@ -58,6 +58,15 @@ type shapeState struct {
 	// Only the mode is persisted (mine.shape.port); on restore the histogram is
 	// re-seeded from it so the representative stays stable across a restart.
 	ports map[int]int
+	// variants is the CARDINALITY-REFINEMENT reservoir: distinct member skeleton
+	// -> aggregated signals. It records the literal each <*> position took so the
+	// refinement (refine.go) can tell a structural position (low-card) from a value
+	// position (high-card) and un-merge the former. Bounded at splitVariantCap
+	// distinct skeletons; on overflow it is freed and overflowed is set (a high-
+	// card value dominates, so the shape stays merged). Not persisted — it re-
+	// accumulates from live traffic after a restart, like the sample reservoir.
+	variants   map[string]*variantAgg
+	overflowed bool
 }
 
 // repPort is the shape's representative destination port: the most-common member
@@ -120,15 +129,41 @@ func newShapeShard() *shapeShard {
 type ShapeStore struct {
 	shards    map[string]*shapeShard
 	maxShapes int
+	// splitCard is the cardinality knob for refinement (refine.go): a <*> position
+	// with <= splitCard distinct literals is STRUCTURAL and gets un-merged; more is
+	// a VALUE and stays wildcarded. splitVariantCap bounds the per-shape variant
+	// reservoir. Both default (defaultSplitCard / defaultSplitVariantCap) and are
+	// overridable via SetSplitParams (env: MINECORE_SPLIT_CARD / _SPLIT_VARIANTS).
+	splitCard       int
+	splitVariantCap int
 }
 
 // NewShapeStore builds an empty store; a non-positive cap falls back to the
-// default per-service shape cap.
+// default per-service shape cap. Refinement knobs default and can be overridden
+// with SetSplitParams.
 func NewShapeStore(maxShapes int) *ShapeStore {
 	if maxShapes <= 0 {
 		maxShapes = defaultMaxShapes
 	}
-	return &ShapeStore{shards: map[string]*shapeShard{}, maxShapes: maxShapes}
+	return &ShapeStore{
+		shards:          map[string]*shapeShard{},
+		maxShapes:       maxShapes,
+		splitCard:       defaultSplitCard,
+		splitVariantCap: defaultSplitVariantCap,
+	}
+}
+
+// SetSplitParams overrides the cardinality-refinement knobs: splitCard (the
+// low/high cardinality boundary at a <*> position) and variantCap (the per-shape
+// distinct-skeleton reservoir bound). Non-positive values keep the current
+// setting, so callers can override one without disturbing the other.
+func (ss *ShapeStore) SetSplitParams(splitCard, variantCap int) {
+	if splitCard > 0 {
+		ss.splitCard = splitCard
+	}
+	if variantCap > 0 {
+		ss.splitVariantCap = variantCap
+	}
 }
 
 func (ss *ShapeStore) shard(service string) *shapeShard {
@@ -204,6 +239,9 @@ func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespF
 		// replay-template synthesis. Members was just incremented above, so it is
 		// the running member count used for the deterministic reservoir slot.
 		st.observeSample(u.Client)
+		// Fold the member's skeleton + signals into the cardinality-refinement
+		// reservoir so refine.go can recover each <*> position's literal alphabet.
+		st.observeVariant(skeleton, f, flagIn, ua, ss.splitVariantCap)
 		ids = append(ids, id)
 	}
 

@@ -61,10 +61,12 @@ type Engine struct {
 }
 
 func New(database *db.Database, cfg Config) *Engine {
+	store := NewShapeStore(cfg.MaxShapes)
+	store.SetSplitParams(cfg.SplitCard, cfg.SplitVariantCap)
 	return &Engine{
 		db:                      database,
 		cfg:                     cfg,
-		shapeStore:              NewShapeStore(cfg.MaxShapes),
+		shapeStore:              store,
 		serviceByPort:           config.ServiceByPort(),
 		resolver:                newServiceResolver(config.ServiceDefs()),
 		flagRe:                  regexp.MustCompile(config.GameFlagRegex()),
@@ -245,6 +247,7 @@ func (e *Engine) refreshFlagIDs() {
 // a restart.
 func (e *Engine) loadShapes(ctx context.Context) {
 	e.shapeStore = restoreShapeStore(loadShapeSnapshots(ctx, e.db.Pool()), e.cfg.MaxShapes)
+	e.shapeStore.SetSplitParams(e.cfg.SplitCard, e.cfg.SplitVariantCap)
 	e.lastSnapshotAt = time.Now()
 }
 

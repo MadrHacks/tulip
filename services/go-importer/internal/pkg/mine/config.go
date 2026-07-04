@@ -27,6 +27,14 @@ type Config struct {
 	// (opaque or highly variable traffic) cannot grow memory without bound.
 	MaxShapes int
 
+	// SplitCard is the cardinality-refinement knob (refine.go): a Drain <*> position
+	// with <= SplitCard distinct literals is STRUCTURAL (an opcode / endpoint / verb)
+	// and gets un-merged into one sub-shape per literal; more distinct literals mark
+	// it a VALUE that stays wildcarded. SplitVariantCap bounds the per-shape reservoir
+	// of distinct member skeletons the refinement reads to make that decision.
+	SplitCard       int
+	SplitVariantCap int
+
 	// ChainDisable turns off cross-flow chain analysis entirely (a load-shed
 	// switch): no per-flow token extraction, no chain shards.
 	ChainDisable bool
@@ -34,14 +42,16 @@ type Config struct {
 
 func ConfigFromEnv() Config {
 	return Config{
-		Horizon:      envDuration("MINECORE_HORIZON", 20*time.Minute),
-		PollBatch:    envInt("MINECORE_POLL_BATCH", 512),
-		PollInterval: envDuration("MINECORE_POLL_INTERVAL", time.Second),
-		ChainWindow:  envDuration("MINECORE_CHAIN_WINDOW", 2*time.Minute),
-		ChainDFMax:   envInt("MINECORE_CHAIN_DF_MAX", 8),
-		ChainMaxSize: envInt("MINECORE_CHAIN_MAX_SIZE", 16),
-		MaxShapes:    envInt("MINECORE_MAX_SHAPES", 2000),
-		ChainDisable: envBool("MINECORE_CHAIN_DISABLE", false),
+		Horizon:         envDuration("MINECORE_HORIZON", 20*time.Minute),
+		PollBatch:       envInt("MINECORE_POLL_BATCH", 512),
+		PollInterval:    envDuration("MINECORE_POLL_INTERVAL", time.Second),
+		ChainWindow:     envDuration("MINECORE_CHAIN_WINDOW", 2*time.Minute),
+		ChainDFMax:      envInt("MINECORE_CHAIN_DF_MAX", 8),
+		ChainMaxSize:    envInt("MINECORE_CHAIN_MAX_SIZE", 16),
+		MaxShapes:       envInt("MINECORE_MAX_SHAPES", 2000),
+		ChainDisable:    envBool("MINECORE_CHAIN_DISABLE", false),
+		SplitCard:       envInt("MINECORE_SPLIT_CARD", defaultSplitCard),
+		SplitVariantCap: envInt("MINECORE_SPLIT_VARIANTS", defaultSplitVariantCap),
 	}
 }
 

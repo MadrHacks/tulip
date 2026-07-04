@@ -80,8 +80,11 @@ func main() {
 
 	// Cross-check: the streaming ShapeStore should derive the same number of
 	// per-request shapes as the pure per-service Drain pass below. It is fed the
-	// same segmented units + response features, one flow at a time.
+	// same segmented units + response features, one flow at a time. The cardinality
+	// refinement knobs are overridable from the environment so the crispness metrics
+	// below can be swept (MINECORE_SPLIT_CARD=K, MINECORE_SPLIT_VARIANTS=cap).
 	store := mine.NewShapeStore(0)
+	store.SetSplitParams(envInt("MINECORE_SPLIT_CARD", 0), envInt("MINECORE_SPLIT_VARIANTS", 0))
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
@@ -230,6 +233,11 @@ func main() {
 	fmt.Println("\nvalidation (flag_present as the flag-leaving signal):")
 	reportGrouping("per-request shapes", units, func(u unitRow) int { return u.shapeID })
 	reportGrouping("split-shapes      ", units, func(u unitRow) int { return u.splitID })
+
+	// crispness metrics: baseline (raw Drain shapes) vs after cardinality
+	// refinement, per service + totals. Uses the streaming store's variant
+	// reservoir (populated by store.Observe above).
+	reportCrispness(store)
 
 	// the flag_present oracle vs official flag_out, at the FLOW level.
 	reportOracle(flows, units)
@@ -386,6 +394,177 @@ func reportOracle(flows []flowRow, units []unitRow) {
 	rec := float64(tp) / float64(max1(tp+fn))
 	fmt.Printf("\nflow-level flag_present vs official flag_out: TP=%d FN=%d FP=%d TN=%d  precision=%.4f recall=%.4f\n",
 		tp, fn, fp, tn, prec, rec)
+}
+
+// reportCrispness prints the crispness metrics baseline (raw Drain shapes) vs
+// after cardinality refinement, per service and in total. The metrics measure
+// whether the shape set is CRISP — neither over-merged (a <*> sitting on a
+// structural low-card position) nor under-merged (distinct shapes that value-
+// masking says are the same interaction). All are protocol-agnostic.
+func reportCrispness(store *mine.ShapeStore) {
+	splitCard := envInt("MINECORE_SPLIT_CARD", 0)
+	if splitCard <= 0 {
+		splitCard = 4 // mirrors defaultSplitCard
+	}
+	fmt.Printf("\ncrispness metrics (baseline raw Drain shapes -> after cardinality refinement, K=%d):\n", splitCard)
+	fmt.Printf("  %-13s %13s %13s %13s %13s %13s %8s\n",
+		"svc", "shapes b->a", "singl% b->a", "overmrg b->a", "undermrg b->a", "exfil90 b->a", "overflow")
+
+	var tBS, tAS, tBSing, tASing, tBOver, tAOver, tBUnder, tAUnder, tBExfil, tAExfil, tOver int
+	for _, svc := range services {
+		parents := store.Shapes(svc)
+		refined := store.RefinedShapes(svc)
+		m := crispRow(parents, refined)
+		overflow := store.OverflowShapes(svc)
+		printCrispRow(svc, m, overflow)
+
+		tBS += m.baseShapes
+		tAS += m.refShapes
+		tBSing += m.baseSingle
+		tASing += m.refSingle
+		tBOver += m.baseOver
+		tAOver += m.refOver
+		tBUnder += m.baseUnder
+		tAUnder += m.refUnder
+		tBExfil += m.baseExfil
+		tAExfil += m.refExfil
+		tOver += overflow
+	}
+	printCrispRow("TOTAL", crispMetrics{
+		baseShapes: tBS, refShapes: tAS, baseSingle: tBSing, refSingle: tASing,
+		baseOver: tBOver, refOver: tAOver, baseUnder: tBUnder, refUnder: tAUnder,
+		baseExfil: tBExfil, refExfil: tAExfil,
+	}, tOver)
+	fmt.Println("  metric key: overmrg = shapes with a <*> on a low-card (structural) position;",
+		"undermrg = pairs of shapes identical after re-masking; exfil90 = shapes covering 90% of flag_present units")
+}
+
+// crispMetrics holds one service's baseline (b) and after-refinement (a) numbers.
+type crispMetrics struct {
+	baseShapes, refShapes int
+	baseSingle, refSingle int
+	baseOver, refOver     int
+	baseUnder, refUnder   int
+	baseExfil, refExfil   int
+}
+
+// crispRow computes the crispness metrics for one service from its parent (raw
+// Drain) shapes and its refined (un-merged) shapes.
+func crispRow(parents []mine.Shape, refined []mine.RefinedShape) crispMetrics {
+	byParent := map[int][]mine.RefinedShape{}
+	for _, r := range refined {
+		byParent[r.ParentID] = append(byParent[r.ParentID], r)
+	}
+	var m crispMetrics
+	m.baseShapes = len(parents)
+	baseTemplates := make([]string, 0, len(parents))
+	baseFlag := make([]int, 0, len(parents))
+	for _, p := range parents {
+		baseTemplates = append(baseTemplates, p.Template)
+		baseFlag = append(baseFlag, p.Signals.FlagPresent)
+		if p.Members == 1 {
+			m.baseSingle++
+		}
+		// A parent is over-merged if refinement changed it: it either split into
+		// several sub-shapes or its template lost a <*> on a structural position.
+		g := byParent[p.TemplateID]
+		if len(g) > 1 || (len(g) == 1 && g[0].Template != p.Template) {
+			m.baseOver++
+		}
+	}
+	m.baseUnder = undermergePairs(baseTemplates)
+	m.baseExfil = cover90(baseFlag)
+
+	m.refShapes = len(refined)
+	refTemplates := make([]string, 0, len(refined))
+	refFlag := make([]int, 0, len(refined))
+	for _, r := range refined {
+		refTemplates = append(refTemplates, r.Template)
+		refFlag = append(refFlag, r.Signals.FlagPresent)
+		if r.Members == 1 {
+			m.refSingle++
+		}
+		if r.LowCardWild { // residual over-merge after refinement (want 0)
+			m.refOver++
+		}
+	}
+	m.refUnder = undermergePairs(refTemplates)
+	m.refExfil = cover90(refFlag)
+	return m
+}
+
+func printCrispRow(svc string, m crispMetrics, overflow int) {
+	pct := func(n, d int) float64 {
+		if d == 0 {
+			return 0
+		}
+		return 100 * float64(n) / float64(d)
+	}
+	fmt.Printf("  %-13s %5d->%-6d %5.1f->%-6.1f %5d->%-6d %5d->%-6d %5d->%-6d %8d\n",
+		svc,
+		m.baseShapes, m.refShapes,
+		pct(m.baseSingle, m.baseShapes), pct(m.refSingle, m.refShapes),
+		m.baseOver, m.refOver,
+		m.baseUnder, m.refUnder,
+		m.baseExfil, m.refExfil,
+		overflow)
+}
+
+// undermergePairs counts unordered pairs of shapes (by template) that collapse to
+// the same string after re-applying value masking (mine.RemaskTemplate) — the
+// under-merge / over-fragmentation probe. Shapes whose templates already differ
+// only in a value position (an id that slipped past masking) are the target.
+func undermergePairs(templates []string) int {
+	buckets := map[string]int{}
+	for _, t := range templates {
+		buckets[mine.RemaskTemplate(t)]++
+	}
+	pairs := 0
+	for _, n := range buckets {
+		if n > 1 {
+			pairs += n * (n - 1) / 2
+		}
+	}
+	return pairs
+}
+
+// cover90 returns how many shapes (largest flag_present counts first) it takes to
+// cover 90% of all flag_present units — the exfil-consolidation metric (want
+// small: the leak concentrates in few shapes).
+func cover90(flagCounts []int) int {
+	total := 0
+	for _, c := range flagCounts {
+		total += c
+	}
+	if total == 0 {
+		return 0
+	}
+	sorted := append([]int(nil), flagCounts...)
+	sort.Sort(sort.Reverse(sort.IntSlice(sorted)))
+	need := float64(total) * 0.9
+	acc, cover := 0, 0
+	for _, c := range sorted {
+		if float64(acc) >= need {
+			break
+		}
+		acc += c
+		cover++
+	}
+	return cover
+}
+
+// envInt reads an integer environment variable, returning def when unset or
+// unparseable.
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func distinctInts(units []unitRow, id func(unitRow) int) int {
