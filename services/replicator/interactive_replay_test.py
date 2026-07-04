@@ -236,6 +236,56 @@ class TestHeldOutReconstruction(unittest.TestCase):
         self.assertTrue(body.endswith(b"\"}"))
         self.assertEqual(int(cl.group(1)), 18)              # 9 + 7 + 2 bytes
 
+    def test_grants_override_random_and_flagid_per_slot(self):
+        # The held-out fidelity path GRANTS the held-out instance's OWN
+        # unpredictable RANDOM/flagId values per (step, slot) — like the reference
+        # engine — while MIRROR/SELFREF/LENGTH stay DERIVED. Here a plan whose
+        # small-sample classifier tagged the register username FLAGID (a second
+        # flagid slot in an earlier step) must still reconstruct byte-exact: a flat
+        # flagids list cannot (fill_slots restarts it per step), but per-slot grants
+        # can.
+        plan = {
+            "service": "svc", "port": 9,
+            "steps": [
+                {"template": {"segments": [const_seg(b"register user="), VAR,
+                                           const_seg(b" pw="), VAR, const_seg(b"\n")],
+                              "slots": [{"type": "flagid"},
+                                        {"type": "random", "charclass": "alnum",
+                                         "min_len": 8, "max_len": 8}]}, "expect": "ok"},
+                {"template": {"segments": [const_seg(b"get "), VAR, const_seg(b"\n")],
+                              "slots": [{"type": "flagid"}]}, "expect": "FLAG"},
+            ],
+            "links": [],
+        }
+        conn = FakeConn([b"ok", b"FLAG{x}"])
+        grants = {
+            0: {0: b"HELDOUT_USERNAME", 1: b"pw012345"},  # username-as-flagid + random
+            1: {0: b"REAL-SELECTOR-42"},                   # the genuine retrieval flagId
+        }
+        # flagids padded so fill_slots (restarts per step) never runs out; grants override.
+        r = replay_interactive(plan, conn, flagids=[b""], grants=grants)
+        self.assertTrue(r["ok"], r["error"])
+        self.assertEqual(conn.sent[0], b"register user=HELDOUT_USERNAME pw=pw012345\n")
+        self.assertEqual(conn.sent[1], b"get REAL-SELECTOR-42\n")  # distinct value, right step
+
+    def test_grants_default_off_is_pure_random(self):
+        # Without grants the RANDOM path is unchanged (fresh nonce of the asked width).
+        plan = {
+            "service": "svc", "port": 9,
+            "steps": [
+                {"template": {"segments": [const_seg(b"n="), VAR, const_seg(b"\n")],
+                              "slots": [{"type": "random", "charclass": "alnum",
+                                         "min_len": 6, "max_len": 6}]}, "expect": None},
+            ],
+            "links": [],
+        }
+        conn = FakeConn([b"ok"])
+        r = replay_interactive(plan, conn)
+        self.assertTrue(r["ok"], r["error"])
+        body = conn.sent[0]
+        self.assertTrue(body.startswith(b"n=") and body.endswith(b"\n"))
+        self.assertEqual(len(body), len(b"n=") + 6 + len(b"\n"))
+
     def test_computed_slot_refuses_to_fire(self):
         # A COMPUTED slot (crypto/session token the engine could not prove
         # regenerable) must gate the plan: fail closed, send nothing.

@@ -22,7 +22,8 @@ class Conn(Protocol):
     def recv_until(self, marker: Optional[bytes]) -> bytes: ...
 
 
-def replay_interactive(plan: dict, conn: Conn, *, flagids: Optional[list[bytes]] = None) -> dict:
+def replay_interactive(plan: dict, conn: Conn, *, flagids: Optional[list[bytes]] = None,
+                       grants: Optional[dict] = None) -> dict:
     # Honor the engine's UNREPRODUCIBLE verdict: a plan gated for a COMPUTED
     # required slot (crypto/session token) or a TLS/WS/opaque service carries no
     # runnable steps and must never be fired — skip it (escalate to a human),
@@ -43,4 +44,4 @@ def replay_interactive(plan: dict, conn: Conn, *, flagids: Optional[list[bytes]]
             marker = marker.encode()
         return conn.recv_until(marker)
 
-    return run_steps(steps, links, execute, flagids=flagids)
+    return run_steps(steps, links, execute, flagids=flagids, grants=grants)

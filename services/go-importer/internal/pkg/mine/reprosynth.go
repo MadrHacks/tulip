@@ -325,9 +325,28 @@ func analyseShape(allFlows [][]db.Turn, service string, port int, flagRe *regexp
 		}
 		// MIRROR: value comes from a PRIOR server message.
 		if mir := discoverMirror(vals, prior); mir != nil {
-			classes[sv] = &slotClass{kind: "MIRROR", transform: mir.transform,
-				prefix: mir.prefix, suffix: mir.suffix,
-				sourceTurn: mirrorSourceTurn(flows[0], ti, mir.prefix)}
+			srcTurn := mirrorSourceTurn(flows[0], ti, mir.prefix)
+			// Re-derive the capture delimiters within the SOURCE TURN's response
+			// ALONE. discoverMirror derives them over the whole concatenated prior
+			// server, so a suffix can bleed into a LATER turn's response — which in
+			// a minimized live single-connection replay (that later turn is often
+			// dropped) never arrives, leaving the extract unmatchable. Confining the
+			// delimiters to the one response the producer step actually reads keeps
+			// the emitted extract runnable; fall back to the original delimiters if
+			// the value is not self-contained in that single response.
+			srcResps := make([][]byte, len(flows))
+			for k, f := range flows {
+				rp := responsesPaired(f)
+				if srcTurn < len(rp) {
+					srcResps[k] = rp[srcTurn]
+				}
+			}
+			m := mir
+			if m2 := discoverMirror(vals, srcResps); m2 != nil {
+				m = m2
+			}
+			classes[sv] = &slotClass{kind: "MIRROR", transform: m.transform,
+				prefix: m.prefix, suffix: m.suffix, sourceTurn: srcTurn}
 			continue
 		}
 		// FLAGID-EXTERNAL: a non-echoed URL selector in the RETRIEVAL turn.

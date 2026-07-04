@@ -136,7 +136,8 @@ def _fail(steps_run, responses, carried, error) -> dict:
     return {"ok": False, "steps_run": steps_run, "responses": responses, "carried": carried, "error": error}
 
 
-def run_steps(steps: list[dict], links: list[dict], execute: Execute, *, flagids=None) -> dict:
+def run_steps(steps: list[dict], links: list[dict], execute: Execute, *, flagids=None,
+              grants=None) -> dict:
     """Drive an ordered list of steps, carrying derived values between them.
 
     Two link kinds (from the reproduction engine):
@@ -156,6 +157,14 @@ def run_steps(steps: list[dict], links: list[dict], execute: Execute, *, flagids
 
     A COMPUTED slot (crypto/session token the engine could not prove regenerable)
     in a step fails the plan closed: it is unreproducible and must never be fired.
+
+    ``grants`` is a held-out-fidelity affordance (default None -> no effect, the
+    production path never passes it): ``{step_index: {slot_index: bytes}}`` of
+    pre-supplied slot values applied right after fill_slots. It exists so the
+    leave-one-out fidelity test can GRANT the "fresh flagId + fresh nonces" (the
+    held-out instance's OWN unpredictable RANDOM/flagId values) exactly as the
+    reference engine does, while MIRROR/SELFREF/LENGTH stay DERIVED (never granted)
+    — the real test of the model.
     """
     producers, consumers = _wire(links)
     responses: list[bytes] = []
@@ -177,6 +186,14 @@ def run_steps(steps: list[dict], links: list[dict], execute: Execute, *, flagids
                 )
 
         slot_values = fill_slots(template, flagids=flagids)
+
+        # Held-out fidelity grants: substitute the held-out instance's OWN
+        # RANDOM/flagId values (unpredictable, hence granted just like the
+        # reference) BEFORE link injection and length recompute, so SELFREF
+        # producers carry the granted value and LENGTH still recomputes over it.
+        if grants:
+            for si_slot, val in grants.get(i, {}).items():
+                slot_values[si_slot] = val
 
         for li in consumers.get(i, ()):
             link = links[li]
