@@ -36,8 +36,8 @@ func (e *Engine) maybeDetect(ctx context.Context) {
 		if lost[service] <= 0 {
 			continue
 		}
-		for _, fs := range e.shapeStore.FlagShapes(service) {
-			e.maybeSynthInteractiveShape(ctx, service, int64(fs.ID), fs.Port)
+		for _, fs := range e.shapeStore.RefinedFlagShapes(service) {
+			e.maybeSynthInteractiveShape(ctx, service, fs.ID, fs.Port)
 		}
 	}
 }

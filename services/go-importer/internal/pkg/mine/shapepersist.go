@@ -99,3 +99,16 @@ func deleteShapes(ctx context.Context, pool *pgxpool.Pool, service string, ids [
 		log.Println("minecore: delete shapes:", err)
 	}
 }
+
+// deleteShapeIDs drops persisted rows by bigint shape id — the reconciliation path
+// for crisp refined rows (ids >= refinedIDBase) that are no longer produced.
+func deleteShapeIDs(ctx context.Context, pool *pgxpool.Pool, service string, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+	_, err := pool.Exec(ctx,
+		`DELETE FROM mine.shape WHERE service = $1 AND shape_id = ANY($2)`, service, ids)
+	if err != nil {
+		log.Println("minecore: delete refined shapes:", err)
+	}
+}

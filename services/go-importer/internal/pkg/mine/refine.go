@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"hash/fnv"
 	"sort"
 	"strings"
 )
@@ -43,7 +44,80 @@ import (
 const (
 	defaultSplitCard       = 4  // <= this many distinct literals at a <*> position => STRUCTURAL (split)
 	defaultSplitVariantCap = 64 // per-shape cap on distinct member skeletons tracked for refinement
+
+	// variantSampleCap bounds the raw request-unit samples kept PER distinct
+	// member skeleton (variant). A refined sub-shape's replay template is aligned
+	// from its constituent variants' samples, so this reservoir is what makes the
+	// per-shape template synthesis HOMOGENEOUS: a split sub-shape aligns only its
+	// own members' bytes, never the parent's mush. Kept small (memory is bounded by
+	// splitVariantCap * this * shapeSampleCap per shape) but >= coreQuorum so a
+	// single-variant sub-shape can still reach synthesis quorum.
+	variantSampleCap = 8
+
+	// refinedGatherCap bounds the samples a single refined sub-shape gathers from
+	// its constituent variants for alignment, capping the multiple-alignment input.
+	refinedGatherCap = 32
+
+	// refinedIDBase is the low end of the refined-shape id space. A refined-shape id
+	// is a deterministic hash of its (crisp) template OR'd with this base, so it
+	// always sits >= 2^32 and can NEVER collide with a Drain parent shape id (a
+	// small monotonic per-service counter). Persisted refined rows are told apart
+	// from Drain-seed parent rows on restore by exactly this threshold.
+	refinedIDBase = 1 << 32
 )
+
+// refinedShapeIDForTemplate maps a refined (crisp) template to its STABLE shape
+// id: a deterministic 63-bit FNV-1a hash of the template string, forced into the
+// refined id space (>= refinedIDBase). It is content-derived — no Drain counter,
+// no time, no random — so the SAME crisp interaction re-derives the SAME id across
+// a restart once the variant reservoir re-accumulates the same traffic, and two
+// parents that refine to the same template collapse to one crisp shape (a desired
+// un-split). Because it never depends on the parent Drain id it survives parent-id
+// churn, and because it is >= refinedIDBase it never aliases a parent id.
+func refinedShapeIDForTemplate(template string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(template))
+	return int64(h.Sum64()>>1) | refinedIDBase
+}
+
+// refinedTemplateForSkeleton finds the crisp refined template one member skeleton
+// belongs to, among a parent shape's refined sub-shapes. A skeleton matches a
+// refined template iff at every non-wildcard position their literals agree
+// (wildcards match anything); the refinement partitions the reservoir, so a
+// reservoir skeleton matches exactly one leaf — ties (only possible for a novel
+// skeleton) are broken toward the most specific (fewest wildcards) match. A
+// skeleton that matches none (e.g. a new literal after an overflow froze the
+// reservoir) falls back to the parent template, i.e. the coarse shape.
+func refinedTemplateForSkeleton(skeleton string, refined []RefinedShape, parentTemplate string) string {
+	toks := strings.Fields(skeleton)
+	best := ""
+	bestWild := -1
+	for _, r := range refined {
+		rt := strings.Fields(r.Template)
+		if len(rt) != len(toks) {
+			continue
+		}
+		match := true
+		wild := 0
+		for i := range rt {
+			if rt[i] == drainParamStr {
+				wild++
+				continue
+			}
+			if rt[i] != toks[i] {
+				match = false
+				break
+			}
+		}
+		if match && (bestWild < 0 || wild < bestWild) {
+			best, bestWild = r.Template, wild
+		}
+	}
+	if bestWild < 0 {
+		return parentTemplate
+	}
+	return best
+}
 
 // variantAgg is the aggregated signal vector of one distinct member skeleton
 // within a shape (the refinement reservoir's value). Keyed by the exact skeleton
@@ -55,6 +129,12 @@ type variantAgg struct {
 	flagIn        int
 	sizeBucketSum int
 	actors        map[string]int
+	// samples is a bounded reservoir of this variant's RAW request-unit bytes,
+	// reservoir-sampled as members arrive (deterministic slot, size-capped). A
+	// refined sub-shape aligns the union of its variants' samples, so its replay
+	// template is synthesized from HOMOGENEOUS members only. Not persisted — it
+	// re-accumulates from live traffic after a restart, like the parent reservoir.
+	samples [][]byte
 }
 
 // observeVariant folds one member into the shape's refinement reservoir, keyed by
@@ -64,7 +144,7 @@ type variantAgg struct {
 // then leaves it as-is (a high-card value dominates, so keeping it merged is the
 // correct outcome anyway). Members already counted on the parent shape must be
 // mirrored here for the split re-aggregation to be exact.
-func (st *shapeState) observeVariant(skeleton string, f RespFeatures, flagIn bool, ua string, cap int) {
+func (st *shapeState) observeVariant(skeleton string, f RespFeatures, flagIn bool, ua string, raw []byte, cap int) {
 	if st.overflowed {
 		return
 	}
@@ -95,6 +175,25 @@ func (st *shapeState) observeVariant(skeleton string, f RespFeatures, flagIn boo
 	if ua != "" {
 		v.actors[ua]++
 	}
+	v.observeSample(raw)
+}
+
+// observeSample folds one raw request-unit sample into this variant's bounded
+// reservoir (deterministic slot, size-capped, copied so it never aliases the live
+// buffer). Members must already be incremented for this member (used as the slot).
+func (v *variantAgg) observeSample(raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+	if len(raw) > shapeSampleCap {
+		raw = raw[:shapeSampleCap]
+	}
+	cp := append([]byte(nil), raw...)
+	if len(v.samples) < variantSampleCap {
+		v.samples = append(v.samples, cp)
+		return
+	}
+	v.samples[v.members%variantSampleCap] = cp
 }
 
 // RefinedShape is a shape after cardinality refinement: one true interaction-kind.
@@ -109,6 +208,10 @@ type RefinedShape struct {
 	Signals     ShapeSignals // re-aggregated over this sub-shape's members
 	Split       bool         // true when the parent split into >1 sub-shape
 	LowCardWild bool         // a <*> still sits on a low-card position (residual over-merge)
+	// samples is the union of this sub-shape's constituent variants' raw request
+	// samples (bounded), the HOMOGENEOUS substrate its replay template is aligned
+	// from. Unexported: a derived-view detail, not part of the neutral signal.
+	samples [][]byte
 }
 
 // refineItem pairs a member skeleton's tokens with its aggregated signals for the
@@ -221,6 +324,11 @@ func aggregateRefined(parentID int, tmplTokens []string, items []refineItem, spl
 		for a, c := range it.agg.actors {
 			r.Signals.Actors[a] += c
 		}
+		for _, s := range it.agg.samples {
+			if len(r.samples) < refinedGatherCap {
+				r.samples = append(r.samples, s)
+			}
+		}
 	}
 	r.LowCardWild = len(structuralPositions(tmplTokens, items, splitCard)) > 0
 	return r
@@ -240,6 +348,9 @@ func (st *shapeState) unrefined(tmpl string) RefinedShape {
 			SizeBucketSum: s.Signals.SizeBucketSum,
 			Actors:        copyActors(s.Signals.Actors),
 		},
+		// No per-variant reservoir (overflowed / not yet observed): fall back to the
+		// parent's raw-sample reservoir so the coarse shape can still synthesize.
+		samples: st.samples,
 	}
 }
 
@@ -279,6 +390,25 @@ func (ss *ShapeStore) OverflowShapes(service string) int {
 		}
 	}
 	return n
+}
+
+// refinedIDFor returns the stable refined-shape id a member skeleton maps to
+// within its parent Drain shape, given the current variant reservoir. cache
+// memoizes the parent's refinement across a single flow's units (a flow often
+// repeats one interaction). This is the LIVE tag path's id — it must agree with
+// the id refinedSnapshots persists, and it does: both hash the same crisp
+// template via refinedShapeIDForTemplate.
+func (sh *shapeShard) refinedIDFor(parentID int, skeleton string, splitCard int, cache map[int][]RefinedShape) int64 {
+	st := sh.shapes[parentID]
+	if st == nil {
+		return refinedShapeIDForTemplate(skeleton)
+	}
+	rs, ok := cache[parentID]
+	if !ok {
+		rs = st.refine(splitCard)
+		cache[parentID] = rs
+	}
+	return refinedShapeIDForTemplate(refinedTemplateForSkeleton(skeleton, rs, st.shape.Template))
 }
 
 // RemaskTemplate re-applies the SAME value masking that normalization (skeleton.go)

@@ -104,10 +104,15 @@ func TestShapeStoreSnapshotRestoreStableIDs(t *testing.T) {
 	if restored.ShapeCount("svc") != ss.ShapeCount("svc") {
 		t.Fatalf("restored %d shapes, want %d", restored.ShapeCount("svc"), ss.ShapeCount("svc"))
 	}
-	// Signals round-trip.
+	// Structural state round-trips on the parent-seed row: members, template, and
+	// actors. The flag_present SIGNAL deliberately does NOT ride the seed row — it
+	// lives on the crisp refined rows — so a restored parent carries no flag.
 	rGet, ok := shapeByID(restored, "svc", idGet)
-	if !ok || rGet.Members != 1 || rGet.Signals.FlagPresent != 1 || rGet.Signals.Actors["checker"] != 1 {
+	if !ok || rGet.Members != 1 || rGet.Signals.Actors["checker"] != 1 {
 		t.Errorf("restored GET shape = %+v", rGet)
+	}
+	if rGet.Signals.FlagPresent != 0 {
+		t.Errorf("restored parent-seed flag_present = %d, want 0 (flag lives on refined rows)", rGet.Signals.FlagPresent)
 	}
 	if rGet.Template != "GET api status" {
 		t.Errorf("restored GET template = %q", rGet.Template)

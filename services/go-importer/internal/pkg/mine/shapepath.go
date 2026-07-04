@@ -56,8 +56,12 @@ func buildShapeTags(store *ShapeStore, service string, msgs []db.FlowMessage, fl
 		feats[i] = ResponseFeatures(units[i].Response)
 	}
 	res := store.Observe(service, units, feats, flagIn, port, t)
-	tags := make([]string, 0, len(res.ShapeIDs)+1)
-	for _, id := range distinctShapeIDs(res.ShapeIDs) {
+	tags := make([]string, 0, len(res.RefinedIDs)+1)
+	// Tag by CRISP refined id, so a flow's shape:<svc>:<id> tags name the real
+	// interaction-kinds it exercised (the boomerang IDOR distinct from a benign
+	// sibling), and the candidate/interactive lookups that key off these tags hit
+	// homogeneous members.
+	for _, id := range distinctRefinedIDs(res.RefinedIDs) {
 		tags = append(tags, fmt.Sprintf("shape:%s:%d", service, id))
 	}
 	tags = append(tags, "session:"+sessionHash(res.SessionShape))
@@ -76,28 +80,58 @@ func (e *Engine) shapeTags(f *Flow, service string, t int64) []string {
 	return buildShapeTags(e.shapeStore, service, msgs, f.FlagsIn > 0, f.DstPort, t)
 }
 
-// snapshotShapes bounds each shape shard to the configured cap (deleting the
-// evicted rows) and persists the survivors to mine.shape — the shape-side twin
-// of the cluster snapshot/eviction in maybeSnapshot.
+// snapshotShapes bounds each shape shard to the configured cap and persists two
+// row classes to mine.shape:
+//
+//   - PARENT SEED rows (Drain shape id): keyed by the small Drain id, they carry
+//     the Drain template so restoreShapeStore can re-seed the miner and keep parent
+//     ids stable. They carry NO replay body, so the candidate reader never treats
+//     an over-merged parent as a candidate.
+//   - REFINED rows (id >= refinedIDBase): one per crisp interaction-kind, each with
+//     its flag_present signal and a replay template aligned from HOMOGENEOUS
+//     members. These are the vectors /candidates surfaces.
+//
+// Refined rows are reconciled against what this process last wrote: a refined id we
+// persisted before but no longer produce (a split that merged, an evicted parent)
+// is deleted, so stale crisp rows do not linger. The reconciliation only forgets
+// ids written IN THIS PROCESS, so a fresh restart never wipes the pre-restart rows
+// (kept as candidates) before the reservoir re-warms.
 func (e *Engine) snapshotShapes(ctx context.Context) {
-	// Give settled shapes their REPLAY template before persisting: multiple-align
-	// each shape's reservoir of raw samples into typed Const/Var slots (reuses the
-	// cluster path's synthesize + slot-typing). The resulting {segments,slots}
-	// body then rides the snapshot into mine.shape.template_body.
-	e.shapeStore.SynthesizeTemplates(e.flagRe, e.flagIDSet())
+	pool := e.db.Pool()
+	// Parent seed rows: evict past the cap (dropping evicted rows) then persist the
+	// survivors so the Drain re-seeds on restart.
 	for service, ids := range e.shapeStore.EvictToCap() {
-		deleteShapes(ctx, e.db.Pool(), service, ids)
+		deleteShapes(ctx, pool, service, ids)
 	}
 	for service, snaps := range e.shapeStore.snapshot() {
-		saveShapeSnapshots(ctx, e.db.Pool(), service, snaps)
+		saveShapeSnapshots(ctx, pool, service, snaps)
+	}
+	// Crisp refined rows: the candidate vectors. Synthesized from each sub-shape's
+	// own samples inside refinedSnapshots.
+	for service, snaps := range e.shapeStore.refinedSnapshots(e.flagRe, e.flagIDSet()) {
+		saveShapeSnapshots(ctx, pool, service, snaps)
+		cur := make(map[int64]struct{}, len(snaps))
+		for _, s := range snaps {
+			cur[int64(s.ShapeID)] = struct{}{}
+		}
+		if prev := e.persistedRefined[service]; len(prev) > 0 {
+			var stale []int64
+			for id := range prev {
+				if _, ok := cur[id]; !ok {
+					stale = append(stale, id)
+				}
+			}
+			deleteShapeIDs(ctx, pool, service, stale)
+		}
+		e.persistedRefined[service] = cur
 	}
 }
 
-// distinctShapeIDs de-duplicates a flow's per-unit shape ids, preserving first
+// distinctRefinedIDs de-duplicates a flow's per-unit refined ids, preserving first
 // appearance so the emitted shape:* tags are deterministic.
-func distinctShapeIDs(ids []int) []int {
-	seen := make(map[int]bool, len(ids))
-	out := make([]int, 0, len(ids))
+func distinctRefinedIDs(ids []int64) []int64 {
+	seen := make(map[int64]bool, len(ids))
+	out := make([]int64, 0, len(ids))
 	for _, id := range ids {
 		if !seen[id] {
 			seen[id] = true

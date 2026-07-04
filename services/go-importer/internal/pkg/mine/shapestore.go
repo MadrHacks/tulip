@@ -2,6 +2,7 @@ package mine
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -175,11 +176,13 @@ func (ss *ShapeStore) shard(service string) *shapeShard {
 	return sh
 }
 
-// ObserveResult is what Observe hands back so the caller (later wired into
-// handle()) can tag the flow: the per-unit shape ids in flow order and the
-// flow's session shape signature (the ordered id sequence).
+// ObserveResult is what Observe hands back so the caller (wired into handle())
+// can tag the flow: the per-unit Drain (parent) shape ids in flow order, the
+// per-unit CRISP refined shape ids (the granularity the live tags/candidates run
+// at), and the flow's session shape signature (the ordered parent-id sequence).
 type ObserveResult struct {
 	ShapeIDs     []int
+	RefinedIDs   []int64
 	SessionShape string
 }
 
@@ -195,6 +198,7 @@ type ObserveResult struct {
 func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespFeatures, flagIn bool, port int, t int64) ObserveResult {
 	sh := ss.shard(service)
 	ids := make([]int, 0, len(units))
+	skels := make([]string, 0, len(units))
 	for i, u := range units {
 		skeleton, ua := NormalizeUnit(u)
 		id := sh.drain.Add(skeleton)
@@ -239,15 +243,26 @@ func (ss *ShapeStore) Observe(service string, units []RequestUnit, feats []RespF
 		// replay-template synthesis. Members was just incremented above, so it is
 		// the running member count used for the deterministic reservoir slot.
 		st.observeSample(u.Client)
-		// Fold the member's skeleton + signals into the cardinality-refinement
-		// reservoir so refine.go can recover each <*> position's literal alphabet.
-		st.observeVariant(skeleton, f, flagIn, ua, ss.splitVariantCap)
+		// Fold the member's skeleton + signals (and raw bytes) into the cardinality-
+		// refinement reservoir so refine.go can recover each <*> position's literal
+		// alphabet and align a crisp per-sub-shape replay template.
+		st.observeVariant(skeleton, f, flagIn, ua, u.Client, ss.splitVariantCap)
 		ids = append(ids, id)
+		skels = append(skels, skeleton)
+	}
+
+	// Resolve each unit's CRISP refined id now that this flow's members are folded
+	// into the reservoir. Memoized per parent shape (a flow often repeats one
+	// interaction), the id is the granularity handle() tags the flow at.
+	refined := make([]int64, len(ids))
+	cache := map[int][]RefinedShape{}
+	for i := range ids {
+		refined[i] = sh.refinedIDFor(ids[i], skels[i], ss.splitCard, cache)
 	}
 
 	sig := SessionShape(ids)
 	sh.sessions[sig]++
-	return ObserveResult{ShapeIDs: ids, SessionShape: sig}
+	return ObserveResult{ShapeIDs: ids, RefinedIDs: refined, SessionShape: sig}
 }
 
 // Shapes returns a snapshot copy of one service's live shapes, ordered by shape
@@ -290,6 +305,50 @@ func (ss *ShapeStore) FlagShapes(service string) []FlagShape {
 	for id, st := range sh.shapes {
 		if st.shape.Signals.FlagPresent > 0 {
 			out = append(out, FlagShape{ID: id, Port: st.repPort()})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// RefinedFlagShape is a CRISP flag-leaking shape: a refined sub-shape carrying the
+// flag_present SIGNAL, with its representative replay port. It is the granularity
+// the detection pass now pursues — one candidate per real interaction-kind, so the
+// boomerang IDOR is a distinct target from a byte-adjacent benign endpoint. Still
+// NEUTRAL: flag_present is a signal, and the replicator's NOP-proof is the sole
+// arbiter of a real exploit.
+type RefinedFlagShape struct {
+	ID   int64
+	Port int
+}
+
+// RefinedFlagShapes returns a service shard's CRISP shapes whose flag_present
+// signal is > 0, each with its representative destination port, ordered by id. It
+// is the refined twin of FlagShapes: it refines every parent shape and reports the
+// flag-carrying sub-shapes, so an over-merged parent no longer smears a real
+// vector across benign siblings.
+func (ss *ShapeStore) RefinedFlagShapes(service string) []RefinedFlagShape {
+	sh := ss.shards[service]
+	if sh == nil {
+		return nil
+	}
+	seen := map[int64]int{} // refined id -> index in out (merge same-template across parents)
+	var out []RefinedFlagShape
+	for _, st := range sh.shapes {
+		port := st.repPort()
+		for _, r := range st.refine(ss.splitCard) {
+			if r.Signals.FlagPresent <= 0 {
+				continue
+			}
+			id := refinedShapeIDForTemplate(r.Template)
+			if idx, ok := seen[id]; ok {
+				if out[idx].Port == 0 {
+					out[idx].Port = port
+				}
+				continue
+			}
+			seen[id] = len(out)
+			out = append(out, RefinedFlagShape{ID: id, Port: port})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -368,7 +427,13 @@ type shapeSnapshot struct {
 	TemplateBody  []byte // marshaled *Template (replay template), or nil
 }
 
-// snapshot returns every shard's shapes as durable snapshots, keyed by service.
+// snapshot returns every shard's shapes as durable PARENT-SEED snapshots, keyed by
+// service. These rows exist to re-seed the Drain (their id + template rebuild the
+// prefix tree so parent ids stay stable across a restart) and carry NO flag/replay
+// signal: the flag_present SIGNAL and the replay body live on the CRISP refined
+// rows (refinedSnapshots), so an over-merged parent never masquerades as a
+// candidate. Members is kept (the Drain cluster size for reinsert); actors/size
+// ride along as harmless continuity annotations.
 func (ss *ShapeStore) snapshot() map[string][]shapeSnapshot {
 	out := make(map[string][]shapeSnapshot, len(ss.shards))
 	for svc, sh := range ss.shards {
@@ -379,18 +444,130 @@ func (ss *ShapeStore) snapshot() map[string][]shapeSnapshot {
 				Template:      st.shape.Template,
 				Members:       st.shape.Members,
 				SizeBucketSum: st.shape.Signals.SizeBucketSum,
-				FlagPresent:   st.shape.Signals.FlagPresent,
-				FlagIn:        st.shape.Signals.FlagIn,
+				FlagPresent:   0, // seed row: the flag signal lives on the crisp refined rows
+				FlagIn:        0,
 				Actors:        copyActors(st.shape.Signals.Actors),
 				FirstSeen:     st.firstSeen,
 				LastSeen:      st.lastSeen,
 				Port:          st.repPort(),
-				TemplateBody:  st.templateBody(),
+				// In production the engine never synthesizes parent templates, so this
+				// is nil (the replay body lives on the crisp refined rows). It is kept
+				// as st.templateBody() only so the in-memory synth/round-trip machinery
+				// stays exercised; a body here is harmless as the candidate gate is
+				// flag_present > 0, which a seed row never carries.
+				TemplateBody: st.templateBody(),
 			})
 		}
 		out[svc] = snaps
 	}
 	return out
+}
+
+// refinedAgg accumulates one crisp refined shape across every parent that refines
+// to its template (a rare cross-parent merge, but kept exact): summed signals, a
+// bounded sample union for alignment, and a port histogram for the replay port.
+type refinedAgg struct {
+	template      string
+	members       int
+	flagPresent   int
+	flagIn        int
+	sizeBucketSum int
+	actors        map[string]int
+	samples       [][]byte
+	firstSeen     int64
+	lastSeen      int64
+	ports         map[int]int
+}
+
+// refinedSnapshots is the CRISP durable form of the store: it refines every parent
+// shape and emits ONE snapshot per refined interaction-kind (keyed by the stable
+// refined id), synthesizing each sub-shape's replay template from its own
+// homogeneous samples. These rows are what the candidate reader consumes, so a
+// candidate is a crisp vector, not an over-merged parent. It never re-seeds the
+// Drain (parent rows do that), so it carries no Drain-stability burden.
+func (ss *ShapeStore) refinedSnapshots(flagRe *regexp.Regexp, flagIDs map[string]bool) map[string][]shapeSnapshot {
+	out := make(map[string][]shapeSnapshot, len(ss.shards))
+	for svc, sh := range ss.shards {
+		aggs := map[int64]*refinedAgg{}
+		order := make([]int64, 0, len(sh.shapes))
+		for _, st := range sh.shapes {
+			port := st.repPort()
+			for _, r := range st.refine(ss.splitCard) {
+				id := refinedShapeIDForTemplate(r.Template)
+				a := aggs[id]
+				if a == nil {
+					a = &refinedAgg{
+						template:  r.Template,
+						actors:    map[string]int{},
+						ports:     map[int]int{},
+						firstSeen: st.firstSeen,
+						lastSeen:  st.lastSeen,
+					}
+					aggs[id] = a
+					order = append(order, id)
+				}
+				a.members += r.Members
+				a.flagPresent += r.Signals.FlagPresent
+				a.flagIn += r.Signals.FlagIn
+				a.sizeBucketSum += r.Signals.SizeBucketSum
+				for k, v := range r.Signals.Actors {
+					a.actors[k] += v
+				}
+				for _, s := range r.samples {
+					if len(a.samples) < refinedGatherCap {
+						a.samples = append(a.samples, s)
+					}
+				}
+				if port != 0 {
+					a.ports[port] += r.Members
+				}
+				if st.firstSeen < a.firstSeen {
+					a.firstSeen = st.firstSeen
+				}
+				if st.lastSeen > a.lastSeen {
+					a.lastSeen = st.lastSeen
+				}
+			}
+		}
+		sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+		snaps := make([]shapeSnapshot, 0, len(order))
+		for _, id := range order {
+			a := aggs[id]
+			var body []byte
+			if tpl := synthesizeShapeTemplate(a.samples, flagRe, flagIDs); tpl != nil {
+				if b, err := json.Marshal(tpl); err == nil {
+					body = b
+				}
+			}
+			snaps = append(snaps, shapeSnapshot{
+				ShapeID:       int(id),
+				Template:      a.template,
+				Members:       a.members,
+				SizeBucketSum: a.sizeBucketSum,
+				FlagPresent:   a.flagPresent,
+				FlagIn:        a.flagIn,
+				Actors:        a.actors,
+				FirstSeen:     a.firstSeen,
+				LastSeen:      a.lastSeen,
+				Port:          modePort(a.ports),
+				TemplateBody:  body,
+			})
+		}
+		out[svc] = snaps
+	}
+	return out
+}
+
+// modePort returns the most-common port in a histogram (smallest-port tie-break),
+// or 0 when empty — the refined shape's representative replay port.
+func modePort(ports map[int]int) int {
+	best, bestN := 0, -1
+	for p, n := range ports {
+		if n > bestN || (n == bestN && p < best) {
+			best, bestN = p, n
+		}
+	}
+	return best
 }
 
 // restoreShapeStore rebuilds a store from persisted snapshots. Rebuilding each
@@ -404,6 +581,13 @@ func restoreShapeStore(snaps map[string][]shapeSnapshot, maxShapes int) *ShapeSt
 		ordered := append([]shapeSnapshot(nil), list...)
 		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ShapeID < ordered[j].ShapeID })
 		for _, s := range ordered {
+			// Only Drain-seed parent rows (small ids) rebuild the miner + parent
+			// shape state; crisp refined rows (id >= refinedIDBase) re-derive from the
+			// variant reservoir as live traffic re-accumulates, so they are skipped
+			// here (and left in the DB as candidates until the next refined snapshot).
+			if s.ShapeID >= refinedIDBase {
+				continue
+			}
 			sh.drain.reinsert(s.ShapeID, strings.Fields(s.Template), s.Members)
 			st := &shapeState{
 				shape: Shape{

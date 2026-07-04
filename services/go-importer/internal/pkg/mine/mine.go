@@ -39,6 +39,13 @@ type Engine struct {
 	fidRe          *regexp.Regexp // precompiled flagId matcher, rebuilt on refresh
 	flagIDsAt      time.Time
 	lastSnapshotAt time.Time
+	caughtUpOnce   bool // fired the first (warm) refined snapshot once backlog drained
+
+	// persistedRefined tracks, per service, the crisp refined ids this process last
+	// wrote to mine.shape, so a refined shape that stops being produced (a split
+	// that merged, an evicted parent) is reconciled away without wiping pre-restart
+	// rows on the first post-restart snapshot.
+	persistedRefined map[string]map[int64]struct{}
 
 	lastPropagateAt time.Time
 	verdicts        map[string]string // cluster tag -> advisory verdict suggestion
@@ -72,6 +79,7 @@ func New(database *db.Database, cfg Config) *Engine {
 		flagRe:                  regexp.MustCompile(config.GameFlagRegex()),
 		flagLifetime:            config.GameFlagLifetimeTicks() * config.GameTickDurationSec(),
 		verdicts:                map[string]string{},
+		persistedRefined:        map[string]map[int64]struct{}{},
 		shapeInteractiveSynthed: map[string]bool{},
 		chains:                  map[string]*chainAnalyzer{},
 		chainClusters:           newChainClusterStore(),
@@ -133,6 +141,15 @@ func (e *Engine) Run(ctx context.Context) {
 		// A short batch means we have caught up; a full one means there is more
 		// backlog to drain immediately.
 		if len(flows) < e.cfg.PollBatch {
+			// The first time we drain the backlog, snapshot immediately: shapes are
+			// now warm, so crisp candidates land in mine.shape without waiting a full
+			// snapshot interval (a fresh minecore otherwise has no candidates for ~a
+			// minute after every restart).
+			if !e.caughtUpOnce {
+				e.caughtUpOnce = true
+				e.snapshotShapes(ctx)
+				e.lastSnapshotAt = time.Now()
+			}
 			time.Sleep(e.cfg.PollInterval)
 		}
 	}
