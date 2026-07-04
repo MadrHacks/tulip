@@ -23,6 +23,16 @@ class Conn(Protocol):
 
 
 def replay_interactive(plan: dict, conn: Conn, *, flagids: Optional[list[bytes]] = None) -> dict:
+    # Honor the engine's UNREPRODUCIBLE verdict: a plan gated for a COMPUTED
+    # required slot (crypto/session token) or a TLS/WS/opaque service carries no
+    # runnable steps and must never be fired — skip it (escalate to a human),
+    # never open the connection. Belt-and-suspenders: the candidate reader already
+    # filters these out at the DB, but a broken plan must never reach the wire.
+    if plan.get("unreproducible"):
+        return {
+            "ok": False, "steps_run": 0, "responses": [], "carried": {},
+            "error": "unreproducible plan: " + (plan.get("reason") or "gated by the reproduction engine"),
+        }
     steps = plan.get("steps", [])
     links = plan.get("links", [])
 
