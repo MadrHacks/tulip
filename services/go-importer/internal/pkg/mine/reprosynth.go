@@ -20,7 +20,7 @@ import (
 )
 
 type slotClass struct {
-	kind string // FLAGID MIRROR SELFREF RANDOM LENGTH CONST_WS FLAG_PLANT COMPUTED
+	kind string // FLAGID MIRROR SELFREF RANDOM LENGTH CONST_WS CONST_HDR FLAG_PLANT COMPUTED
 
 	echoTransform string // FLAGID
 	external      bool   // FLAGID (external gameserver id)
@@ -65,6 +65,15 @@ var (
 	reWSFrame = regexp.MustCompile(`\b40\{"|\b0\{"sid"`)
 	reRegTurn = regexp.MustCompile(`(?i)/register|/signup|Signup`)
 	reMenuInt = regexp.MustCompile(`^\d{1,3}$`)
+	// reBenignHdr matches (from the start of a header line up to the slot) a
+	// client-preference request header whose value the server does not key
+	// anything security-relevant on. Such a value is CLIENT-CHOSEN, so any
+	// recorded literal replays validly — it must never gate an otherwise-
+	// reproducible exfil as COMPUTED. Deliberately EXCLUDES Host, Content-Type,
+	// Content-Length, Cookie and Authorization (those are load-bearing / handled
+	// elsewhere), so a body data param, a length, or an auth/crypto value is
+	// never masked. Scoped to the header region only (see benignHdrPos).
+	reBenignHdr = regexp.MustCompile(`(?i)^(accept|accept-encoding|accept-language|accept-charset|accept-datetime|user-agent|connection|keep-alive|referer|referrer|origin|cache-control|pragma|dnt|te|priority|upgrade-insecure-requests|x-requested-with|sec-[a-z-]+)\s*:`)
 )
 
 func isLineProto(service string, port int) bool {
@@ -255,12 +264,16 @@ func analyseShape(allFlows [][]db.Turn, service string, port int, flagRe *regexp
 	urlPos := map[[2]int]bool{}
 	authPos := map[[2]int]bool{}
 	lenPos := map[[2]int]bool{}
+	benignHdrPos := map[[2]int]bool{}
 	for ti := 0; ti < nturns; ti++ {
 		refb := segBytes(aligns[ti])
 		fl := bytes.IndexByte(refb, '\n')
 		if fl < 0 {
 			fl = len(refb)
 		}
+		// Header region ends at the blank line before the body; a slot in the body
+		// (JSON data param, crypto blob) must NOT be treated as a benign header.
+		bodyStart := bytes.Index(refb, []byte("\r\n\r\n"))
 		offs := slotOffsets(aligns[ti])
 		for vk, off := range offs {
 			urlPos[[2]int{ti, vk}] = off < fl
@@ -268,6 +281,12 @@ func analyseShape(allFlows [][]db.Turn, service string, port int, flagRe *regexp
 			authPos[[2]int{ti, vk}] = reAuthCtx.Match(authWin)
 			lenWin := refb[maxInt(0, off-24):off]
 			lenPos[[2]int{ti, vk}] = reLenCtx.Match(lenWin)
+			// Benign iff past the request line, before the body, and its header
+			// line starts with an allowlisted client-preference header name.
+			if off > fl && (bodyStart < 0 || off <= bodyStart) {
+				lineStart := bytes.LastIndexByte(refb[:off], '\n') + 1
+				benignHdrPos[[2]int{ti, vk}] = reBenignHdr.Match(refb[lineStart:off])
+			}
 		}
 	}
 
@@ -291,6 +310,19 @@ func analyseShape(allFlows [][]db.Turn, service string, port int, flagRe *regexp
 		}
 		if allWS {
 			classes[sv] = &slotClass{kind: "CONST_WS"}
+			continue
+		}
+		// BENIGN HTTP request-header value (Accept-Encoding, User-Agent,
+		// Connection, ...): client-chosen, not keyed on by the server, so ANY
+		// recorded value replays validly. Pin it to the recorded literal (CONST)
+		// rather than let its cross-client variation gate the whole session
+		// COMPUTED. Checked before FLAGID/MIRROR/RANDOM because benign header
+		// tokens ("close", "keep-alive", "br, zstd") otherwise coincidentally
+		// co-occur in server bytes and mis-type as FLAGID. Position-scoped (header
+		// region, allowlisted name) so a body/auth/length slot is never masked;
+		// nop-proof remains the sole arbiter of a real exploit.
+		if benignHdrPos[sv] {
+			classes[sv] = &slotClass{kind: "CONST_HDR"}
 			continue
 		}
 		// FLAG_PLANT: client is sending the flag itself.
@@ -663,7 +695,7 @@ func emitSlot(prog *reproProgram, ti, vk int, c *slotClass, stepIndex map[int]in
 		return s
 	case "LENGTH":
 		return Slot{Type: SlotLength}
-	case "CONST_WS":
+	case "CONST_WS", "CONST_HDR":
 		if utf8.Valid(example) {
 			return Slot{Type: SlotConst, Example: string(example)}
 		}
