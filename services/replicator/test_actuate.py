@@ -1,7 +1,7 @@
 import base64
 import unittest
 
-from actuate import Config, Replicator, extract_flags
+from actuate import Config, Replicator, extract_flags, select_flagids
 
 
 def _cfg(team_id=36):
@@ -23,6 +23,43 @@ class TestExtractFlags(unittest.TestCase):
 
     def test_none(self):
         self.assertEqual(extract_flags(b"nothing here", r"[A-Z0-9]{31}="), [])
+
+
+class TestFlagIdMapping(unittest.TestCase):
+    # CC2026 feed: flagstore shortname (Skypedia-1/-2) -> team -> round -> {desc: value}.
+    def _feed(self):
+        return {
+            "Skypedia-1": {"7": {"5": {"passport": "PORT7A"}},
+                           "8": {"5": {"passport": "PORT8"}}},
+            "Skypedia-2": {"7": {"5": {"booking": "BOOK7"}}},
+            "Boomthrow-1": {"7": {"5": {"id": "BOOM7"}}},
+        }
+
+    def test_lowercase_mine_service_resolves_all_flagstores(self):
+        # 'skypedia' must resolve BOTH Skypedia-1 and Skypedia-2 for the target team,
+        # and never leak another service or another team.
+        got = select_flagids(self._feed(), "skypedia", 7)
+        self.assertEqual(sorted(got), [b"BOOK7", b"PORT7A"])
+
+    def test_narrows_to_target_team(self):
+        self.assertEqual(select_flagids(self._feed(), "skypedia", 8), [b"PORT8"])
+
+    def test_absent_service_returns_nothing_not_foreign_ids(self):
+        self.assertEqual(select_flagids(self._feed(), "dutyfree", 7), [])
+
+    def test_services_wrapper_and_dotted_ip_team_key(self):
+        feed = {"availableTeams": ["10.60.7.1"],
+                "services": {"Boomthrow-1": {"10.60.7.1": {"3": {"id": "UUID7"}}}}}
+        self.assertEqual(select_flagids(feed, "boomthrow", 7), [b"UUID7"])
+
+    def test_already_service_filtered_team_keyed(self):
+        # Endpoint honored ?service=: top level is teams -> narrow by team only.
+        feed = {"7": {"5": {"passport": "P7"}}, "8": {"5": {"passport": "P8"}}}
+        self.assertEqual(select_flagids(feed, "skypedia", 7), [b"P7"])
+
+    def test_flat_list_flattened(self):
+        self.assertEqual(sorted(select_flagids(["A", "B"], "skypedia", 7)),
+                         [b"A", b"B"])
 
 
 class TestGates(unittest.TestCase):
