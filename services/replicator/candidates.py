@@ -100,11 +100,17 @@ def read_candidates(dsn: str) -> list[dict]:
             if conn.execute(
                 "SELECT to_regclass('mine.shape_interactive')"
             ).fetchone()[0] is not None:
+                # reproducible = true (default) filters out plans the engine
+                # GATED as Unreproducible (a required COMPUTED/crypto slot, or a
+                # TLS/WS/opaque service): those are recorded with a reason but must
+                # never be fanned out as a broken exploit. COALESCE keeps pre-column
+                # rows (all reproducible) valid.
                 interactive_rows = conn.execute(
                     """
                     SELECT si.service, si.shape_id, si.port, si.plan
                     FROM mine.shape_interactive si
                     JOIN mine.heat h ON h.service = si.service AND h.our_lost > 0
+                    WHERE COALESCE(si.reproducible, true)
                     ORDER BY si.shape_id
                     """
                 ).fetchall()

@@ -23,6 +23,14 @@ const (
 	SlotFlag                    // our flag, loot to strip
 	SlotFlagID                  // a flagId, re-fetched per target
 	SlotRandom                  // high-entropy nonce, regenerate
+	// Interactive-plan slot kinds ported from the reference engine. A MIRROR /
+	// SELFREF slot's value is DERIVED live by an InteractiveLink (its initial
+	// fill is irrelevant), a LENGTH slot MUST be recomputed from the body, and a
+	// COMPUTED slot is unreproducible (it only ever appears in a gated plan).
+	SlotMirror   // value carried from an earlier server response (typed by a link)
+	SlotSelfref  // value copied from an earlier client slot (typed by a link)
+	SlotLength   // a Content-Length: derivable, recompute from the body bytes
+	SlotComputed // crypto/HMAC/session token we cannot regenerate -> GATE
 )
 
 func (s SlotType) String() string {
@@ -35,6 +43,14 @@ func (s SlotType) String() string {
 		return "flagid"
 	case SlotRandom:
 		return "random"
+	case SlotMirror:
+		return "mirror"
+	case SlotSelfref:
+		return "selfref"
+	case SlotLength:
+		return "length"
+	case SlotComputed:
+		return "computed"
 	default:
 		return "unknown"
 	}
@@ -59,6 +75,14 @@ func (s *SlotType) UnmarshalJSON(b []byte) error {
 		*s = SlotFlagID
 	case "random":
 		*s = SlotRandom
+	case "mirror":
+		*s = SlotMirror
+	case "selfref":
+		*s = SlotSelfref
+	case "length":
+		*s = SlotLength
+	case "computed":
+		*s = SlotComputed
 	default:
 		*s = SlotUnknown
 	}
@@ -169,6 +193,18 @@ type Slot struct {
 	MinLen    int      `json:"min_len,omitempty"`
 	MaxLen    int      `json:"max_len,omitempty"`
 	Example   string   `json:"example,omitempty"`
+
+	// Interactive typed-slot detail (ported from the reference). A MIRROR slot
+	// carries the decode transform + capture delimiters of its source in an
+	// earlier server response; a SELFREF slot names the earlier client slot it
+	// copies. Both are ALSO wired operationally as an InteractiveLink; these
+	// fields let a persisted plan round-trip its full typing and let a reader
+	// verify the link. Empty for the plain (single-request) template path.
+	Transform    string `json:"transform,omitempty"`     // MIRROR decode transform
+	MirrorPrefix []byte `json:"mirror_prefix,omitempty"` // MIRROR source prefix delimiter
+	MirrorSuffix []byte `json:"mirror_suffix,omitempty"` // MIRROR source suffix delimiter
+	SourceStep   int    `json:"source_step,omitempty"`   // MIRROR producer step / SELFREF source step
+	SourceSlot   int    `json:"source_slot,omitempty"`   // SELFREF source slot ordinal
 }
 
 func countVarSegments(segs []Segment) int {

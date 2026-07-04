@@ -52,9 +52,13 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) {
 			shape_id bigint NOT NULL,
 			port integer NOT NULL DEFAULT 0,
 			plan jsonb NOT NULL,
+			reproducible boolean NOT NULL DEFAULT true,
+			reason text NOT NULL DEFAULT '',
 			created_at timestamptz NOT NULL DEFAULT now(),
 			PRIMARY KEY (service, shape_id)
 		);
+			ALTER TABLE mine.shape_interactive ADD COLUMN IF NOT EXISTS reproducible boolean NOT NULL DEFAULT true;
+			ALTER TABLE mine.shape_interactive ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT '';
 	`)
 	if err != nil {
 		log.Fatalln("minecore: ensure schema:", err)

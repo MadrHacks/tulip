@@ -55,6 +55,29 @@ class TestInteractiveReplay(unittest.TestCase):
         self.assertTrue(r["ok"], r["error"])
         self.assertEqual(conn.sent[0], b"get FID-42\n")          # flagid slot filled from the fetched id
 
+    def test_selfref_reuses_earlier_sent_slot(self):
+        # register mints a random credential; login must reuse that SAME sent
+        # value (a selfref link), not a freshly generated one, or the session
+        # would not authenticate.
+        plan = {
+            "steps": [
+                {"template": {"segments": [const_seg(b"register "), {"var": True}, const_seg(b"\n")],
+                              "slots": [{"type": "random", "charclass": "alnum", "min_len": 8, "max_len": 8}]},
+                 "expect": "ok"},
+                {"template": {"segments": [const_seg(b"login "), {"var": True}, const_seg(b"\n")],
+                              "slots": [{"type": "selfref"}]}, "expect": "FLAG"},
+            ],
+            "links": [{"kind": "selfref", "producer_step": 0, "producer_slot": 0,
+                       "consumer_step": 1, "inject_slot": 0, "extract": ""}],
+        }
+        conn = FakeConn([b"registered ok", b"FLAG{y}"])
+        r = replay_interactive(plan, conn)
+        self.assertTrue(r["ok"], r["error"])
+        user_reg = conn.sent[0][len(b"register "):-1]     # the random creds sent at register
+        user_login = conn.sent[1][len(b"login "):-1]       # the creds sent at login
+        self.assertEqual(user_reg, user_login)             # selfref copied the earlier sent value
+        self.assertTrue(len(user_reg) == 8)
+
     def test_extract_failure_reported(self):
         plan = {
             "steps": [

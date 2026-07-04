@@ -196,6 +196,34 @@ func (db *Database) FlowTurns(flowId uuid.UUID) ([]Turn, error) {
 	return groupTurns(chunks), nil
 }
 
+// ShapeFlowIDs returns up to `limit` flag-out flow ids tagged `tag`, richest
+// (most client raw items) first — the homogeneous shape members the interactive
+// reproduction engine aligns and classifies. Ordering by client-turn count picks
+// the fullest sessions, which carry the most structure to align against.
+func (db *Database) ShapeFlowIDs(tag string, limit int) ([]uuid.UUID, error) {
+	rows, err := db.pool.Query(context.Background(),
+		`SELECT fi.flow_id
+		 FROM flow_item fi JOIN flow f ON f.id = fi.flow_id
+		 WHERE f.tags ? $1 AND f.tags ? 'flag-out' AND fi.kind = 'raw' AND fi.direction = 'c'
+		 GROUP BY fi.flow_id
+		 ORDER BY count(*) DESC
+		 LIMIT $2`,
+		tag, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // rawChunk is one direction-tagged raw flow_item, in id (arrival) order.
 type rawChunk struct {
 	fromClient bool
