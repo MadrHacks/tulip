@@ -23,6 +23,18 @@ import (
 
 const drainParamStr = "<*>"
 
+// Default Drain knee — the crispness-swept grouping granularity (see the config
+// sweep: K in {3,4} is the only crisp window; sim_th=0.6 is the floor that avoids
+// the 0.5 "GET <*>" structural-merge blob while staying below the 0.7/0.8
+// over-split; depth=4 minimizes singletons with no over-merge). These are the
+// production defaults; MINECORE_DRAIN_SIM_TH / MINECORE_DRAIN_DEPTH override them
+// only when an operator opts in. Kept alongside defaultSplitCard (refine.go, K=4)
+// so the whole recommended {K, sim_th, depth} config reads from named defaults.
+const (
+	defaultDrainSimTh = 0.6
+	defaultDrainDepth = 4
+)
+
 type drainNode struct {
 	children   map[string]*drainNode
 	clusterIDs []int
@@ -55,10 +67,10 @@ type Drain struct {
 // prototype's knee (depth 4, sim_th 0.6).
 func NewDrain(simTh float64, depth, maxChildren int) *Drain {
 	if depth < 3 {
-		depth = 4
+		depth = defaultDrainDepth
 	}
 	if simTh <= 0 {
-		simTh = 0.6
+		simTh = defaultDrainSimTh
 	}
 	if maxChildren <= 0 {
 		maxChildren = 100
@@ -79,13 +91,13 @@ func NewDrain(simTh float64, depth, maxChildren int) *Drain {
 // be swept for crispness tuning; unset/invalid values fall back to the knee, so
 // production behavior is unchanged unless the operator opts in.
 func NewShapeGrouper() *Drain {
-	simTh := 0.6
+	simTh := defaultDrainSimTh
 	if v := os.Getenv("MINECORE_DRAIN_SIM_TH"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			simTh = f
 		}
 	}
-	depth := 4
+	depth := defaultDrainDepth
 	if v := os.Getenv("MINECORE_DRAIN_DEPTH"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			depth = n
