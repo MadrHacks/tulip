@@ -371,3 +371,55 @@ func (db *Database) ClusterMemberData(tag string, horizonSecs float64, limit int
 	}
 	return out, nil
 }
+
+// IssuerPoolFlows returns the turns of up to `limit` recent flows on service
+// port `port` whose SERVER side handed a session credential back to the client
+// — a response `Set-Cookie:` header — as the candidate ISSUER pool for
+// cross-connection session stitching. A cookie/token-auth service splits one
+// logical session across separate TCP connections: the login that RECEIVES
+// `Set-Cookie: PHPSESSID=V` carries NO flag, so it never appears among a shape's
+// flag-out members and must be drawn from this wider same-service pool; the
+// stitcher then concatenates it before the (separate) flag-leaking read that
+// PRESENTS V, turning the external cookie into an in-session Set-Cookie->Cookie
+// mirror.
+//
+// Read-only and bounded: scoped to one service port, the last `horizonSecs`
+// (the engine's correlation horizon), most-recent flows first, capped at
+// `limit`. The `Set-Cookie` prefilter runs in SQL so only genuine issuers are
+// materialized; the stitcher's issuedCreds re-validates each pooled flow (and
+// additionally recovers any response-body token), so a coincidental match is
+// harmless. Turns are read verbatim like FlowTurns.
+func (db *Database) IssuerPoolFlows(port int, horizonSecs float64, limit int) ([][]Turn, error) {
+	rows, err := db.pool.Query(context.Background(), `
+		SELECT DISTINCT f.id
+		FROM flow f JOIN flow_item fi ON fi.flow_id = f.id
+		WHERE f.port_dst = $1
+			AND f.id > fid_pack_low(now() - make_interval(secs => $2))
+			AND fi.direction = 's' AND fi.kind = 'raw'
+			AND position(convert_to('Set-Cookie', 'UTF8') in fi.data) > 0
+		ORDER BY f.id DESC
+		LIMIT $3
+	`, port, horizonSecs, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	out := make([][]Turn, 0, len(ids))
+	for _, id := range ids {
+		turns, err := db.FlowTurns(id)
+		if err == nil && len(turns) > 0 {
+			out = append(out, turns)
+		}
+	}
+	return out, nil
+}

@@ -5,11 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"go-importer/internal/pkg/db"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// stitchPoolCap bounds the candidate-issuer pool a shape draws for cross-
+// connection session stitching: at most this many recent same-service
+// Set-Cookie flows are materialized (see db.IssuerPoolFlows). Large enough to
+// hold every login within the correlation horizon on one service port, capped
+// so a busy port cannot grow the pool without bound.
+const stitchPoolCap = 2000
 
 // InteractiveStep is one turn of a replayed session: the client request as a
 // fillable template plus the server prompt to read until before the next step
@@ -173,6 +181,7 @@ func (e *Engine) buildShapeInteractivePlan(ctx context.Context, service, tag str
 		return nil
 	}
 	if len(flows) >= coreQuorum {
+		flows = e.stitchShapeSessions(service, port, flows)
 		plan := synthesizeInteractivePlan(service, port, flows, e.flagRe)
 		return &plan
 	}
@@ -191,6 +200,130 @@ func (e *Engine) buildShapeInteractivePlan(ctx context.Context, service, tag str
 	}
 	plan := e.synthesizeInteractive(service, port, richest)
 	return &plan
+}
+
+// stitchShapeSessions re-assembles the cross-connection sessions a cookie/token-
+// auth shape splits across TCP connections, so the shape can reproduce. A shape
+// like dutyfree's loyalty IDOR leaks the flag on a standalone GET /user/loyalty?id
+// read that merely PRESENTS a `Cookie: PHPSESSID=V` it never received on that
+// connection — the login that issued V is a separate, flag-less connection absent
+// from these flag-out members. Left alone the cookie types as an unreconstructable
+// external session token and the whole plan gates.
+//
+// It draws a bounded same-service issuer pool (recent Set-Cookie flows) and hands
+// it, with the shape's own members, to the validated stitchSessions primitive:
+// each member that presents an EXTERNAL credential is prefixed with the pooled
+// flow whose response issued that exact VALUE, so V becomes an in-session
+// Set-Cookie->Cookie MIRROR. Members that established their credential in-
+// connection (the shapes that already reproduce) present no external credential,
+// so stitchSessions is a no-op for them; the collision guard (`avoid` = the
+// shape's own same-connection skeletons) additionally leaves a session already
+// present intact unstitched. On any pool error or an empty pool the members are
+// returned unchanged, so the already-reproducing shapes can never regress.
+func (e *Engine) stitchShapeSessions(service string, port int, flows [][]db.Turn) [][]db.Turn {
+	pool, err := e.db.IssuerPoolFlows(port, e.cfg.Horizon.Seconds(), stitchPoolCap)
+	if err != nil {
+		log.Println("minecore: issuer pool:", err)
+		return flows
+	}
+	if len(pool) == 0 {
+		return flows
+	}
+	avoid := make(map[string]bool, len(flows))
+	for _, f := range flows {
+		avoid[flowSkeleton(f)] = true
+	}
+	stitched := stitchSessions(flows, pool, flowSkeleton, avoid)
+
+	// If nothing stitched, the members are the input untouched — hand them straight
+	// through so a shape that already reproduces in-connection stays byte-identical
+	// (the working exfil must never be perturbed by this path).
+	changed := false
+	for i := range stitched {
+		if len(stitched[i]) != len(flows[i]) {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return flows
+	}
+
+	// Stitching prepends each read's own historical issuer, and live logins are
+	// NOT uniform (a value minted by GET / vs POST /login), so the stitched members
+	// can be structurally heterogeneous. analyseShape aligns a HOMOGENEOUS shape;
+	// a minority login variant would ragged-out the whole set. Collapse to the one
+	// dominant flow skeleton so the aligner receives a clean, reproducible sub-shape.
+	return dominantSkeleton(stitched)
+}
+
+// dominantSkeleton returns the members sharing the single most-common flow
+// skeleton, so a stitched set fragmented across login variants collapses to one
+// structurally-homogeneous shape the token aligner can process. The largest group
+// wins; ties break toward the SHORTER session (fewest client turns) — the minimal
+// reproduction — then lexicographically on the skeleton for determinism.
+func dominantSkeleton(flows [][]db.Turn) [][]db.Turn {
+	groups := map[string][][]db.Turn{}
+	order := []string{}
+	for _, f := range flows {
+		s := flowSkeleton(f)
+		if _, ok := groups[s]; !ok {
+			order = append(order, s)
+		}
+		groups[s] = append(groups[s], f)
+	}
+	best := ""
+	for _, s := range order {
+		if best == "" {
+			best = s
+			continue
+		}
+		g, b := groups[s], groups[best]
+		if len(g) > len(b) {
+			best = s
+			continue
+		}
+		if len(g) == len(b) {
+			gt, bt := len(clientTurns(g[0])), len(clientTurns(b[0]))
+			if gt < bt || (gt == bt && s < best) {
+				best = s
+			}
+		}
+	}
+	return groups[best]
+}
+
+// flowSkeleton renders a flow's client turns as the structural skeleton the shape
+// pipeline keys on (NormalizeUnit per request unit, joined), a stable signature
+// that ignores per-instance values but CHANGES when an issuer prefix is prepended.
+// It backs the stitch collision guard: a stitched session whose skeleton already
+// matches a same-connection member is left unstitched, so a stitched self-read
+// never merges into and re-labels a shape that is already reproducing.
+func flowSkeleton(turns []db.Turn) string {
+	proto := "line"
+	for _, t := range turns {
+		if t.FromClient {
+			if reReqLine.Match(t.Data) {
+				proto = "http"
+			}
+			break
+		}
+	}
+	var parts []string
+	for _, t := range turns {
+		if !t.FromClient {
+			continue
+		}
+		units := splitLineOps(t.Data)
+		if proto == "http" {
+			units = splitHTTPRequests(t.Data)
+		}
+		for _, u := range units {
+			sk, _ := NormalizeUnit(RequestUnit{Proto: proto, Client: u})
+			parts = append(parts, sk)
+		}
+	}
+	return strings.Join(parts, "|")
 }
 
 // saveShapeInteractiveTemplate persists a synthesized plan for a shape, keeping
