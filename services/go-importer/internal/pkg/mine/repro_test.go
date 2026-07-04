@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -145,8 +146,11 @@ func TestReproCryptoGates(t *testing.T) {
 	}
 }
 
-// TestReproBoomthrowClassification pins the per-slot classification to the
-// reference: turn0 = 4 RANDOM, turn1 = 2 SELFREF, turn2 = FLAGID + MIRROR.
+// TestReproBoomthrowClassification pins the per-slot classification. turn0 =
+// username + password RANDOM, full_name random remnant RANDOM, and — after the
+// sub-carve — the full_name tail becomes a FLAGID sub-slot (the victim boomerang
+// id the attacker embedded as random + \x01 + <flagId>). turn1 = 2 SELFREF,
+// turn2 = FLAGID + MIRROR.
 func TestReproBoomthrowClassification(t *testing.T) {
 	flows := loadReproFixtures(t)["boomthrow"]
 	prog := analyseShape(flows, "boomthrow", 8080, avFlagRe)
@@ -154,7 +158,7 @@ func TestReproBoomthrowClassification(t *testing.T) {
 		t.Fatalf("analyse failed: %s", prog.buildFail)
 	}
 	want := map[[2]int]string{
-		{0, 0}: "RANDOM", {0, 1}: "RANDOM", {0, 2}: "RANDOM", {0, 3}: "RANDOM",
+		{0, 0}: "RANDOM", {0, 1}: "RANDOM", {0, 2}: "RANDOM", {0, 3}: "FLAGID",
 		{1, 0}: "SELFREF", {1, 1}: "SELFREF",
 		{2, 0}: "FLAGID", {2, 1}: "MIRROR",
 	}
@@ -174,6 +178,165 @@ func TestReproBoomthrowClassification(t *testing.T) {
 	mir := prog.classes[[2]int{2, 1}]
 	if mir.kind == "MIRROR" && (mir.transform != "identity" || mir.sourceTurn != 1) {
 		t.Errorf("mirror transform=%q source=%d, want identity from turn 1", mir.transform, mir.sourceTurn)
+	}
+}
+
+// TestReproBoomthrowFullNameSubCarve pins the sub-carve: the register full_name
+// field, one aligned RANDOM slot before the fix, must split into a RANDOM remnant
+// + a CONST (the \\u0001 separator, preserved faithfully) + a FLAGID sub-slot
+// carrying the victim boomerang id. The plan stays reproducible and the register
+// step reconstructs the captured bytes verbatim (no orphaned JSON backslash).
+func TestReproBoomthrowFullNameSubCarve(t *testing.T) {
+	flows := loadReproFixtures(t)["boomthrow"]
+	prog := analyseShape(flows, "boomthrow", 8080, avFlagRe)
+	if !prog.ok || prog.structural {
+		t.Fatalf("analyse failed: %s", prog.buildFail)
+	}
+	plan := emitPlan(prog, "boomthrow", 8080)
+	if plan.Unreproducible {
+		t.Fatalf("boomthrow gated unexpectedly: %s", plan.Reason)
+	}
+	reg := plan.Steps[0].Template
+	kinds := slotKinds(reg)
+	if kinds[SlotFlagID] == 0 {
+		t.Fatalf("register step carries no FLAGID sub-slot; slots = %v", kinds)
+	}
+	if kinds[SlotRandom] == 0 {
+		t.Errorf("register step lost its RANDOM credentials; slots = %v", kinds)
+	}
+	// The \u0001 separator between the random name and the flagId must survive as
+	// literal const bytes: a JSON escape, so a const segment must carry the whole
+	// \u0001 and never orphan the backslash into a regenerated slot.
+	var constBytes []byte
+	for _, s := range reg.Segments {
+		if !s.Var {
+			constBytes = append(constBytes, s.Const...)
+		}
+	}
+	if !containsSub(constBytes, []byte(`\u0001`)) {
+		t.Errorf("register const bytes do not preserve the backslash-u0001 escape: %q", constBytes)
+	}
+	// Reconstruct the register turn from the template + the recorded flow-0 slot
+	// values: it must be byte-identical to the captured request (proving the escape
+	// and the carved boundaries lose nothing).
+	row := prog.tables0[0]
+	var got []byte
+	vk := 0
+	for _, s := range reg.Segments {
+		if s.Var {
+			got = append(got, row[vk]...)
+			vk++
+			continue
+		}
+		got = append(got, s.Const...)
+	}
+	if orig := clientTurns(flows[0])[0]; !bytes.Equal(got, orig) {
+		t.Errorf("register reconstruction not byte-identical\n got=%q\nwant=%q", got, orig)
+	}
+}
+
+// TestMaximalMirrorCoalescesSplitToken pins Fix 2: a long server-issued token the
+// token aligner split into fragments around a const delimiter must coalesce into
+// ONE maximal-contiguous mirror slot, not two mirror fragments. Here a base64 '/'
+// splits the bearer value into [var][const '/'][var]; the maximal-mirror merge
+// grows the seed to the whole "<A>/<B>" span (the largest region that is a
+// contiguous substring of the prior response) and emits it as one mirror.
+func TestMaximalMirrorCoalescesSplitToken(t *testing.T) {
+	priors := [][]byte{
+		[]byte(`{"session":"AAAAAAAA/BBBBBBBB"}`),
+		[]byte(`{"session":"CCCCCCCC/DDDDDDDD"}`),
+		[]byte(`{"session":"EEEEEEEE/FFFFFFFF"}`),
+	}
+	pieces := []piece{
+		{cb: []byte("Authorization: Bearer ")},
+		{isVar: true, vv: [][]byte{[]byte("AAAAAAAA"), []byte("CCCCCCCC"), []byte("EEEEEEEE")}},
+		{cb: []byte("/")},
+		{isVar: true, vv: [][]byte{[]byte("BBBBBBBB"), []byte("DDDDDDDD"), []byte("FFFFFFFF")}},
+		{cb: []byte("\r\n")},
+	}
+	out := maximalMirrorMerge(pieces, priors)
+
+	nVar := 0
+	var merged piece
+	for _, p := range out {
+		if p.isVar {
+			nVar++
+			merged = p
+		}
+	}
+	if nVar != 1 {
+		t.Fatalf("token split into %d mirror fragments, want 1 coalesced mirror", nVar)
+	}
+	if string(merged.vv[0]) != "AAAAAAAA/BBBBBBBB" {
+		t.Errorf("merged span = %q, want the whole AAAAAAAA/BBBBBBBB token", merged.vv[0])
+	}
+	// The coalesced value must validate as a real (identity) mirror against the
+	// prior responses, so classification types it as a single MIRROR slot.
+	if mir := discoverMirror(merged.vv, priors); mir == nil {
+		t.Errorf("coalesced token does not validate as a mirror against the prior responses")
+	} else if mir.transform != "identity" {
+		t.Errorf("coalesced mirror transform = %q, want identity", mir.transform)
+	}
+}
+
+// TestMaximalMirrorLeavesWholeMirrorUntouched guards that the merge is a strict
+// no-op when a token already mirrors as ONE piece (the boomthrow bearer/gzip blob):
+// there is nothing to coalesce, so the piece list is returned unchanged.
+func TestMaximalMirrorLeavesWholeMirrorUntouched(t *testing.T) {
+	priors := [][]byte{
+		[]byte(`{"token":"H4sIblobONEaaaa"}`),
+		[]byte(`{"token":"H4sIblobTWObbbb"}`),
+	}
+	pieces := []piece{
+		{cb: []byte("Authorization: Bearer ")},
+		{isVar: true, vv: [][]byte{[]byte("H4sIblobONEaaaa"), []byte("H4sIblobTWObbbb")}},
+		{cb: []byte("\r\n")},
+	}
+	out := maximalMirrorMerge(pieces, priors)
+	if len(out) != len(pieces) {
+		t.Fatalf("whole-mirror piece list changed: %d -> %d pieces", len(pieces), len(out))
+	}
+}
+
+// TestSubCarveIsolatesOpaqueRemnant pins Fix 3's mechanism: a field carrying a
+// reproducible flagId AND an opaque client-encoded blob (<flagId>.<hash>) must
+// carve so the flagId is its own sub-slot and the opaque hash is a SEPARATE
+// remnant sub-slot. Gating then localizes to the hash sub-slot instead of typing
+// (and gating) the whole field COMPUTED, so the rest of the field/session survives.
+func TestSubCarveIsolatesOpaqueRemnant(t *testing.T) {
+	vals := [][]byte{
+		[]byte("fc0e0b73-08e4-4e5e-a997-4527e0fc5548.aa11bb22cc33dd44"),
+		[]byte("2233aa44-55bb-66cc-77dd-8899eeff0011.99aa88bb77cc66dd"),
+		[]byte("aabbccdd-1122-3344-5566-77889900aabb.1122334455667788"),
+	}
+	flagResps := [][]byte{
+		[]byte(`{"id":"fc0e0b73-08e4-4e5e-a997-4527e0fc5548","flag":"X"}`),
+		[]byte(`{"id":"2233aa44-55bb-66cc-77dd-8899eeff0011","flag":"X"}`),
+		[]byte(`{"id":"aabbccdd-1122-3344-5566-77889900aabb","flag":"X"}`),
+	}
+	priors := [][]byte{{}, {}, {}}
+	earlier := [][][]byte{nil, nil, nil}
+	pieces := carveVarPiece(vals, flagResps, priors, earlier)
+	if pieces == nil {
+		t.Fatalf("carve did not fire on <flagId>.<hash>")
+	}
+	flagidPiece, remnant := 0, 0
+	for _, p := range pieces {
+		if !p.isVar {
+			continue
+		}
+		if string(p.vv[0]) == "fc0e0b73-08e4-4e5e-a997-4527e0fc5548" {
+			flagidPiece++
+		}
+		if string(p.vv[0]) == "aa11bb22cc33dd44" {
+			remnant++
+		}
+	}
+	if flagidPiece != 1 {
+		t.Errorf("flagId not isolated as its own sub-slot; pieces = %d", len(pieces))
+	}
+	if remnant != 1 {
+		t.Errorf("opaque hash remnant not isolated as its own sub-slot; pieces = %d", len(pieces))
 	}
 }
 
