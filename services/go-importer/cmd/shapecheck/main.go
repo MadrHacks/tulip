@@ -242,15 +242,24 @@ func main() {
 	// the flag_present oracle vs official flag_out, at the FLOW level.
 	reportOracle(flows, units)
 
-	// Replay templates: synthesize the per-shape replay template (align.go
-	// multiple-alignment over each shape's raw-sample reservoir + slot-typing)
-	// and print the structure for the top flag_present shapes. This dataset
-	// carries no live flagId set, so flagId positions type as random/unknown —
-	// but the sanity check is that the VARYING positions land in Var slots while
-	// the skeleton (endpoint/method) stays Const.
-	flagRe := regexp.MustCompile(`[A-Z0-9]{31}=`)
-	store.SynthesizeTemplates(flagRe, map[string]bool{})
-	reportTemplates(store)
+	// Full refined-template dump (SHAPECHECK_DUMP=1): the concrete over-merge probe.
+	if os.Getenv("SHAPECHECK_DUMP") != "" {
+		dumpRefined(store)
+	}
+
+	// Replay-template synthesis is the slow part; skip it under SHAPECHECK_FAST=1
+	// during a parameter sweep (the crispness metrics above do not depend on it).
+	if os.Getenv("SHAPECHECK_FAST") == "" {
+		// Synthesize the per-shape replay template (align.go multiple-alignment over
+		// each shape's raw-sample reservoir + slot-typing) and print the structure
+		// for the top flag_present shapes. This dataset carries no live flagId set,
+		// so flagId positions type as random/unknown — the sanity check is that the
+		// VARYING positions land in Var slots while the skeleton (endpoint/method)
+		// stays Const.
+		flagRe := regexp.MustCompile(`[A-Z0-9]{31}=`)
+		store.SynthesizeTemplates(flagRe, map[string]bool{})
+		reportTemplates(store)
+	}
 
 	_ = shapeTemplate
 }
@@ -437,6 +446,48 @@ func reportCrispness(store *mine.ShapeStore) {
 	}, tOver)
 	fmt.Println("  metric key: overmrg = shapes with a <*> on a low-card (structural) position;",
 		"undermrg = pairs of shapes identical after re-masking; exfil90 = shapes covering 90% of flag_present units")
+
+	// One machine-readable line per run so a parameter sweep can grep the totals.
+	simTh := os.Getenv("MINECORE_DRAIN_SIM_TH")
+	if simTh == "" {
+		simTh = "0.60"
+	}
+	depth := envInt("MINECORE_DRAIN_DEPTH", 4)
+	singlPct := 0.0
+	if tAS > 0 {
+		singlPct = 100 * float64(tASing) / float64(tAS)
+	}
+	fmt.Printf("SWEEP K=%d simth=%s depth=%d | refshapes=%d singl=%.1f%% baseOver=%d refOver=%d under=%d exfil90=%d overflow=%d\n",
+		splitCard, simTh, depth, tAS, singlPct, tBOver, tAOver, tBUnder, tExfil90(tAExfil), tOver)
+}
+
+// tExfil90 is a passthrough kept explicit so the SWEEP line reads the refined
+// (after-refinement) exfil-consolidation figure.
+func tExfil90(v int) int { return v }
+
+// dumpRefined prints every refined shape's template per service (gated by
+// SHAPECHECK_DUMP=1). It is the concrete, K-independent over-merge probe: e.g. the
+// boomthrow IDOR is fixed only when "GET api boomerang ?id" appears as its own
+// refined shape, separate from "GET api user ?id" / "GET api club ?id".
+func dumpRefined(store *mine.ShapeStore) {
+	fmt.Println("\nrefined shapes (per service, template :: members flag_present):")
+	for _, svc := range services {
+		refined := store.RefinedShapes(svc)
+		sort.Slice(refined, func(i, j int) bool {
+			if refined[i].Members != refined[j].Members {
+				return refined[i].Members > refined[j].Members
+			}
+			return refined[i].Template < refined[j].Template
+		})
+		fmt.Printf("  [%s] %d refined shapes:\n", svc, len(refined))
+		for _, r := range refined {
+			mark := ""
+			if r.LowCardWild {
+				mark = "  <<OVERMERGE"
+			}
+			fmt.Printf("    %-44s  m=%-4d fp=%-4d%s\n", r.Template, r.Members, r.Signals.FlagPresent, mark)
+		}
+	}
 }
 
 // crispMetrics holds one service's baseline (b) and after-refinement (a) numbers.

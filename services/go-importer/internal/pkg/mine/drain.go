@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"os"
 	"strconv"
 	"strings"
 )
@@ -72,8 +73,26 @@ func NewDrain(simTh float64, depth, maxChildren int) *Drain {
 	}
 }
 
-// NewShapeGrouper builds a Drain with the prototype's default knee settings.
-func NewShapeGrouper() *Drain { return NewDrain(0.6, 4, 100) }
+// NewShapeGrouper builds a Drain with the prototype's default knee settings
+// (sim_th=0.6, depth=4). Both are overridable from the environment
+// (MINECORE_DRAIN_SIM_TH, MINECORE_DRAIN_DEPTH) so the grouping granularity can
+// be swept for crispness tuning; unset/invalid values fall back to the knee, so
+// production behavior is unchanged unless the operator opts in.
+func NewShapeGrouper() *Drain {
+	simTh := 0.6
+	if v := os.Getenv("MINECORE_DRAIN_SIM_TH"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			simTh = f
+		}
+	}
+	depth := 4
+	if v := os.Getenv("MINECORE_DRAIN_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			depth = n
+		}
+	}
+	return NewDrain(simTh, depth, 100)
+}
 
 func drainTokens(content string) []string {
 	return strings.Fields(content)
